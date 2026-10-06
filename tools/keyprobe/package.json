@@ -1,0 +1,6 @@
+{
+  "name": "mcbot-keyprobe",
+  "private": true,
+  "type": "module",
+  "main": "probe.mjs"
+}

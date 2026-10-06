@@ -1,0 +1,21 @@
+{
+    "id": "spike",
+    "agentName": "Xiaodou",
+    "wakeNames": ["小豆", "xiaodou", "豆豆"],
+    "owners": ["Steve"],
+    "rateLimitMs": 3000,
+    "server": {
+        "host": "127.0.0.1",
+        "port": 25565,
+        "version": "1.21.1",
+        "auth": "offline"
+    },
+    "llm": {
+        "baseUrl": "http://127.0.0.1:8799/v1",
+        "apiKey": "spike",
+        "model": "mcbot/mcbot-spike-model"
+    },
+    "profile": "D:/mc_company_bot/runner/profiles/spike.json",
+    "mindserverPort": 8080,
+    "logAllPrompts": true
+}

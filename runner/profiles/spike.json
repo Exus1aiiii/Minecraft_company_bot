@@ -1,0 +1,5 @@
+{
+    "name": "Xiaodou",
+    "model": "mcbot/mcbot-spike-model",
+    "embedding": "mcbot/mcbot-spike-embed"
+}

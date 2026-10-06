@@ -1,0 +1,7 @@
+﻿{
+  "name": "mcbot-devtools",
+  "private": true,
+  "type": "module",
+  "description": "仅开发期使用：在 Node 里无头跑一遍渲染进程，检查界面能不能装配起来。不参与打包。",
+  "dependencies": { "linkedom": "^0.18.5" }
+}

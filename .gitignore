@@ -1,0 +1,53 @@
+# Node
+node_modules/
+dist/
+build/
+out/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# 本地运行时与配置（含密钥，绝不入库）
+runtime/
+keys.json
+config.local.json
+*.secret.json
+data/
+cache/
+
+# 引擎本体与它那 714 MB 的 node_modules：vendor/mindcraft-develop/ 的**源码**要发，
+# 但依赖、原始下载包不发（人家是 MIT，源码本来就在 GitHub 上，我们只是复用）
+vendor/mindcraft-develop/node_modules/
+vendor/*.tar.gz
+
+# 本机实验垃圾：早期试 npm 缓存、两个本地测试服（各 189 MB，含世界存档）、
+# spike 探针。都是"为了跑通自检/试验"才存在的，不是项目的一部分。
+.npm-cache/
+.spike/
+.probe/
+testserver/
+testserver2/
+world/
+world_nether/
+world_the_end/
+
+# 生成物：runner/bots/<name>.launch.json 是 tools/sync-launch.mjs 从
+# runtime/config.json 生成的（里面带着**你本人的服务器地址和主人名单**），
+# 所以不入库；想要它跑一次 `node --import ./devtools/register-electron-stub.mjs tools\sync-launch.mjs`。
+runner/bots/*.launch.json
+
+# 生成物：tools/keyprobe 的体检报告。记录的是**你这台机器上那把 Key 的状态**
+# （掩码片段、能不能解密、真调一次的用量），换台机器就没意义，也不该入库。
+tools/keyprobe/key-verify-report.txt
+
+# Python（若后续引入）
+__pycache__/
+.venv/
+venv/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.tmp

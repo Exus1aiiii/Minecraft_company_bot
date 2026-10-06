@@ -1,0 +1,16 @@
+{
+  "name": "mc-company-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minecraft 陪伴机器人 —— 像素风 Windows 桌面应用",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "shot": "electron . --shot"
+  },
+  "devDependencies": {
+    "electron": "44.5.1"
+  }
+}

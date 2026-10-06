@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>MC 陪伴机器人</title>
+  <!-- 安全说明：本页是纯本地 file:// 页面，不引 CDN、不发任何网络请求（所有能力都走
+       preload 暴露的 window.mcbot）。刻意**不**下发 CSP：file:// 文档的源是不透明的，
+       `'self'` 匹配不到本地脚本，加了反而会把 index.html 的模块脚本整个挡掉、界面全白。
+       真正的隔离靠 contextIsolation + 禁用 nodeIntegration + 只暴露白名单 IPC。 -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- 整个界面由 app.js 装配；这里只留空壳，避免 HTML 与 JS 两处维护同一份结构 -->
+  <div id="app">
+    <header id="topbar">
+      <span class="brand">MC 陪伴机器人<span class="brand-sub" id="brand-sub">像素面板</span></span>
+      <span class="topbar-spacer"></span>
+      <span class="topbar-stat" id="stat-bots"><span>在线</span><b>—</b></span>
+      <span class="topbar-stat" id="stat-tokens"><span>今日 token</span><b>—</b></span>
+      <span class="topbar-stat" id="stat-gate"><span>门禁拦截</span><b>—</b></span>
+      <span id="save-bar"></span>
+      <button class="btn btn-default btn-sm" id="btn-env-quick" type="button" title="查看环境自检">环境</button>
+    </header>
+
+    <div id="main">
+      <nav id="nav"></nav>
+      <main id="content">
+        <div class="loading">正在初始化界面…</div>
+      </main>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

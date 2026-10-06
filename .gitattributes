@@ -1,0 +1,7 @@
+# 这个项目对**字节**敏感：
+#   · `tools/check-launchers.mjs` 会检查 `.cmd` 必须纯 ASCII+CRLF、`.ps1` 必须 UTF-8 BOM+CRLF；
+#   · `tools/install-node.ps1` 要能直接双击 / 被 git 检出的原样字节运行。
+# 所以这里关掉 git 的一切换行转换 —— 仓库里存的就是磁盘上的字节，
+# 免得出现"我这边是好的，换台机器启动脚本就报 BOM 不对"。
+# 注意用的是 `-text`（不是 `binary`）：只关转换，diff / merge 照常。
+* -text
