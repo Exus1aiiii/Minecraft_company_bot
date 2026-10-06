@@ -36,6 +36,14 @@ world_the_end/
 # 所以不入库；想要它跑一次 `node --import ./devtools/register-electron-stub.mjs tools\sync-launch.mjs`。
 runner/bots/*.launch.json
 
+# 生成物：runner/profiles/<botId>.json 由启动器每次运行时按你的配置重新生成
+# （也是**为什么必须忽略它**：里面写着主人名单 = 你的游戏 ID，还有人格/服务器指向）。
+# 2026-10-06 的教训：这三个文件原先被跟踪进了首个提交，然后在真机上跑过一次之后，
+# 工作区里的版本就带上了**真实游戏 ID** —— 推上去就是一次隐私泄露，
+# 是发布体检（check-publish）那 13 条红线把它们揪出来的。
+# 文件仍然会被正常生成在本地，只是不再入库。
+runner/profiles/
+
 # 生成物：tools/keyprobe 的体检报告。记录的是**你这台机器上那把 Key 的状态**
 # （掩码片段、能不能解密、真调一次的用量），换台机器就没意义，也不该入库。
 tools/keyprobe/key-verify-report.txt

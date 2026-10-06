@@ -49,10 +49,15 @@ const FAKE_KEY_WORDS = /(^|[-_])(test|fake|headless|multibot|dummy|spike|demo|ex
 
 
 // ── .gitignore 解析 ─────────────────────────────────────────────────────────
-// 只实现我们实际用到的那几种形态（目录/、*.后缀、名字、/前缀锚定、!例外），
+// 只实现我们实际用到的那几种形态（目录/、*.后缀、名字、/前缀锚定、!例外、**），
 // 并且**只用来"判断会不会被提交"**，不是 git 的完整实现 —— 说清楚边界比假装完整好。
-function loadIgnoreRules() {
-    const file = path.join(ROOT, '.gitignore');
+// ★ 2026-10-06 补：**要读子目录里的 .gitignore**（`prefix` 参数）。
+//   原来只读根目录那份，于是 `vendor/mindcraft-develop/.gitignore` 里那条 `bots/**/`
+//   不生效 —— 运行时生成的 `vendor/.../bots/Xiaodou/memory.json`（里面有主人的游戏 ID
+//   和聊天记录）被当成"会提交的文件"，报了一片**假红线**。假红线会让人开始怀疑体检本身，
+//   比漏报还贵：真的那条（`runner/profiles/bot-xiaodou.json`）就混在同一片里。
+function loadIgnoreRules(prefix = '') {
+    const file = path.join(ROOT, prefix, '.gitignore');
     const rules = [];
     if (!fs.existsSync(file)) return rules;
     for (const raw of fs.readFileSync(file, 'utf8').split('\n')) {
@@ -63,7 +68,7 @@ function loadIgnoreRules() {
         rules.push({
             negate,
             dirOnly: pat.endsWith('/'),
-            body: pat.replace(/\/$/, '').replace(/^\//, ''),
+            body: prefix + pat.replace(/\/$/, '').replace(/^\//, ''),
             anchored: pat.startsWith('/'),
         });
     }
@@ -106,9 +111,14 @@ function escapeRe(s) {
     return s.replace(/[.+^${}()|[\]\\]/g, '\\$&');
 }
 
-// 把 glob 翻成正则（`*` 不跨 `/`）。注意注释里别出现星号加斜杠 —— 那会把块注释提前闭掉。
+// 把 glob 翻成正则（`*` 不跨 `/`，`**` 跨）。注意注释里别出现星号加斜杠 —— 那会把块注释提前闭掉。
+// ★ `**` 必须单独处理：`bots/**` 要能匹配 `bots/Xiaodou/memory.json`。
+//   第一版把每个 `*` 都翻成 `[^/]*`，于是 `bots/**` 只匹配 `bots/` 下面**一层**，
+//   子目录里的文件全漏了（假红线的根因之一）。
 function globToRe(glob) {
-    return new RegExp('^' + glob.split('/').map((seg) => seg.split('*').map(escapeRe).join('[^/]*')).join('/') + '$');
+    const conv = (s) => s.split('/').map((seg) => seg.split('*').map(escapeRe).join('[^/]*')).join('/');
+    const parts = glob.split('**').map(conv);
+    return new RegExp('^' + parts.join('.*') + '$');
 }
 
 // ── 遍历 ────────────────────────────────────────────────────────────────────
@@ -136,23 +146,31 @@ function statTree(dir) {
 function walk(dir) {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-        if (e.name === '.git') continue;
-        const abs = path.join(dir, e.name);
-        const rel = path.relative(ROOT, abs).split(path.sep).join('/');
-        if (e.isDirectory()) {
-            if (isIgnored(rel, true, rules)) {
-                const t = statTree(abs);
-                ignoredDirs.push({ rel: rel + '/', ...t });
-                continue; // 剪枝：一个 700MB 的目录不必进去数
+    // ★ 子目录里自己的 .gitignore 也要生效（并且只在这一棵子树里生效）：DFS 进出成对 push/pop。
+    const relDir = path.relative(ROOT, dir).split(path.sep).join('/');
+    const localRules = loadIgnoreRules(relDir ? relDir + '/' : '');
+    if (localRules.length) rules.push(...localRules);
+    try {
+        for (const e of entries) {
+            if (e.name === '.git') continue;
+            const abs = path.join(dir, e.name);
+            const rel = path.relative(ROOT, abs).split(path.sep).join('/');
+            if (e.isDirectory()) {
+                if (isIgnored(rel, true, rules)) {
+                    const t = statTree(abs);
+                    ignoredDirs.push({ rel: rel + '/', ...t });
+                    continue; // 剪枝：一个 700MB 的目录不必进去数
+                }
+                walk(abs);
+            } else {
+                let size = 0;
+                try { size = fs.statSync(abs).size; } catch { continue; }
+                if (isIgnored(rel, false, rules)) ignoredFiles.push({ rel, size });
+                else wouldCommit.push({ rel, size });
             }
-            walk(abs);
-        } else {
-            let size = 0;
-            try { size = fs.statSync(abs).size; } catch { continue; }
-            if (isIgnored(rel, false, rules)) ignoredFiles.push({ rel, size });
-            else wouldCommit.push({ rel, size });
         }
+    } finally {
+        if (localRules.length) rules.length -= localRules.length;
     }
 }
 walk(ROOT);
