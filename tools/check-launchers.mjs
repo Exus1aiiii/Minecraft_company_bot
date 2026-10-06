@@ -165,6 +165,12 @@ function stripPsComments(src) {
   }).join('\n');
 }
 
+// ★ 同一个教训在 JS 上也适用（断线原因那条不变量）：门里那段注释写着"原来是这样写的
+//   `bot.on('kicked'|'end', …)`"，拿整份文本去判"没有退回 bot.on"就会被注释破坏。
+//   第一版写了个剥注释器，但它被正则字面量里成对的引号带偏（`/["']/` 这种），
+//   剥不干净 —— 没有价值的复杂度。改成**按行首锚定**：这个仓库里的注释一律以 `//` 开头，
+//   而真正的注册语句是 `bot.on('kicked', …)` 顶着缩进的行首，两者一次性分开。
+
 let ps1 = '';
 try { ps1 = fs.readFileSync(LAUNCHER, 'utf8'); } catch { }
 if (!ps1) {
@@ -331,6 +337,46 @@ must(
   '换镜像之后 npm 报 404 不是用户配错了 —— 是镜像没同步全这个包',
 );
 
+// ── 断线原因这条链（★ 拿用户 m11391 那次报障换来的）────────────────────────
+//   用户看到"bot 受伤后立刻退出、过一会儿又自己进来"，怀疑是门禁拦的。真相是：
+//   服务器把 bot 踢了 → 引擎的 LoginGuard 收到断线就 process.exit(1) → 应用按退避重连。
+//   而**原因被丢了**：引擎用 `this.bot.once('kicked'|'end', …)` 在我们之前注册，
+//   回调里直接 process.exit(1)，我们后挂的监听器永远轮不到 —— 事件日志里
+//   mc/kicked、mc/end 一条都没有，面板上只剩 `[LoginGuard] Disconnected: [object Object]`。
+//   下面这几条钉住修法：抢在前面记录（prependOnceListener）、翻成人话（kick-reason）、
+//   面板认得出（[MCBOT-KICK]）、以及不许把 [object Object] 端给用户。
+const GATE = path.join(ROOT, 'runner', 'mcbot-gate.mjs');
+const KICK_REASON = path.join(ROOT, 'runner', 'kick-reason.mjs');
+const SUPERVISOR = path.join(ROOT, 'app', 'electron', 'supervisor.mjs');
+let gateText = '';
+let kickReasonText = '';
+let supervisorText = '';
+try { gateText = fs.readFileSync(GATE, 'utf8'); } catch { }
+try { kickReasonText = fs.readFileSync(KICK_REASON, 'utf8'); } catch { }
+try { supervisorText = fs.readFileSync(SUPERVISOR, 'utf8'); } catch { }
+// ★ 断言的对象是代码，不是注释：负条件按**行首**锚定（见上面那段说明）。
+const PLAIN_ON_KICKED = /(^|\n)[ \t]*bot\.on\('kicked'/;
+
+must('runner\\kick-reason.mjs 存在（把服务器的踢人原因翻成人话）', fs.existsSync(KICK_REASON),
+  '没有它，用户只会看到 `Disconnected: [object Object]`；就是这个文件头记着那段 protodef 结构');
+must('kick-reason.mjs 认得那个害我们打出 [object Object] 的原因',
+  // ★ 要判**表里的那一行**（key 后面跟着冒号和译文），不能只判 includes —— 文件头的
+  //   注释里也写着同一个 key，只判 includes 的话，把表里那条删掉、注释留着，断言照样绿。
+  /'multiplayer\.disconnect\.invalid_player_movement'[ \t]*:/.test(kickReasonText),
+  '这是最可疑的那条（原版提示 Invalid move player packet received）；认不出它就等于没查出头绪');
+must('门用 prependOnceListener 抢在引擎 process.exit 之前记录断线',
+  /bot\.prependOnceListener\('kicked'/.test(gateText) && /bot\.prependOnceListener\('end'/.test(gateText)
+  && !PLAIN_ON_KICKED.test(gateText),
+  '退回 bot.on(...) 就一定记录不到：引擎在 agent.js:69-89 先注册、回调里 process.exit(1)（我们踩过）');
+must('门把断线原因写进日志与事件（[MCBOT-KICK]）',
+  /const cn = describeKick\(reason\)/.test(gateText) && /console\.log\(\s*`\[MCBOT-KICK\]/.test(gateText),
+  '只 emit 事件不写日志，重启后的日志里就查不到为什么断的');
+must('supervisor 认得 [MCBOT-KICK]，不再把 [object Object] 端给用户',
+  // ★ 不能用 includes('[MCBOT-KICK]')：源码里写的是**正则字面量** `/\[MCBOT-KICK\]/i`，
+  //   方括号是转义过的（和 b153 的 `\bE404\b` 是同一个坑）。
+  supervisorText.includes('MCBOT-KICK') && supervisorText.includes('引擎没能读出原因'),
+  '用户就是被"Disconnected: [object Object]"这句搞糊涂的，面板必须给一句人话');
+
 const brokenInvariants = invariants.filter((i) => !i.ok);
 if (brokenInvariants.length) {
   console.log('');
@@ -342,7 +388,7 @@ if (brokenInvariants.length) {
   console.log(`✗ 启动器内容不变量：${brokenInvariants.length} / ${invariants.length} 条被破坏了。`);
   process.exit(1);
 }
-console.log(`✓ 启动器内容不变量：${invariants.length} 条都还在（等进程 / 沙箱回退 / -Check 真跑 / 一键 bootstrap）。`);
+console.log(`✓ 启动器内容不变量：${invariants.length} 条都还在（等进程 / 沙箱回退 / -Check 真跑 / 一键 bootstrap / 断线原因）。`);
 
 // ============================================================================
 // 第二节之二：乱码哨兵（★ 这条是拿真事故换来的）

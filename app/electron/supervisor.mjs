@@ -67,10 +67,21 @@ function readExitReason(file) {
     if (/duplicate_login|You are already logged in/i.test(l)) return '这个名字已经有人在服务器上了';
     if (/ECONNREFUSED|connect ECONNREFUSED/i.test(l)) return '连不上服务器（端口不通？）';
     if (/ENOTFOUND|getaddrinfo/i.test(l)) return '服务器地址解析不了（地址写错了吗？）';
+    // ★ 门抢在引擎 process.exit 之前写下的那行（runner/mcbot-gate.mjs 的 prependOnceListener）。
+    //   它比引擎自己的 [LoginGuard] 行可靠：引擎的 parseKickReason 认不出原因时会打出
+    //   `Disconnected: [object Object]`（1.21.1 的 kick 原因是嵌套结构，见 runner/kick-reason.mjs 文件头）。
+    if (/\[MCBOT-KICK\]/i.test(l)) return l.replace(/^.*\[MCBOT-KICK\]\s*/, '').slice(0, 120);
     if (/kicked|Kicked/i.test(l)) return `被服务器踢出：${l.replace(/^.*?kicked[^:]*:\s*/i, '').slice(0, 60)}`;
     if (/Invalid username|validateNameFormat/i.test(l)) return '名字不合法（只能用字母数字下划线，3–16 位）';
     if (/unsupported protocol version/i.test(l)) return '服务端版本和引擎对不上';
-    if (/\[LoginGuard\]/i.test(l)) return l.replace(/^.*\[LoginGuard\]\s*/, '').slice(0, 80);
+    if (/\[LoginGuard\]/i.test(l)) {
+      const why = l.replace(/^.*\[LoginGuard\]\s*/, '').slice(0, 80);
+      // 引擎自己没读懂时只剩这两个占位符 —— 原样端给用户等于什么都没说（用户就是被这句搞糊涂的）。
+      if (!why.trim() || /\[object Object\]|Unknown/i.test(why)) {
+        return '被服务器断开了（引擎没能读出原因，最后几行日志里有服务器的原文）';
+      }
+      return why;
+    }
     if (/Error:|Error\b/.test(l) && !/PartialReadError/.test(l)) {
       return l.replace(/^.*?Error:\s*/, '').slice(0, 80);
     }

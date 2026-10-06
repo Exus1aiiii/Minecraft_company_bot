@@ -36,6 +36,7 @@ import { hutPlan, HUT_PRESETS, checkMaterials, findBuildSite, countInInventory, 
 import { parseExploreIntent, pickTarget, exploreTo, scanAround, describeTrip } from './explorer.mjs';
 import { Memory, memoryFileFor, parseRememberIntent, parseRecallIntent, extractFacts, digest } from './memory.mjs';
 import { translateEngineReply } from './engine-speak.mjs';
+import { describeKick } from './kick-reason.mjs';
 import { formatStats, formatInventory, biomeCn, LOCAL_REPORTS } from './self-report.mjs';
 import {
     parseCraftIntent, craftLabel, planFor, runPlan, canCraft, describeNeeds,
@@ -1198,10 +1199,29 @@ if (!rawConfig) {
         // ── 生命周期事件上报（界面上的"在线/血量/坐标"就靠这些）──
         bot.on('login', () => emit('mc', { kind: 'login', name: bot.username }));
         bot.on('spawn', () => emit('mc', { kind: 'spawn', position: fmtPos(bot) }));
-        bot.on('end', (reason) => emit('mc', { kind: 'end', reason: String(reason || '') }));
-        bot.on('kicked', (reason) => emit('mc', { kind: 'kicked', reason: typeof reason === 'string' ? reason : JSON.stringify(reason) }));
         bot.on('death', () => emit('mc', { kind: 'death', position: fmtPos(bot) }));
         bot.on('error', (err) => emit('error', { message: `Minecraft 连接错误：${err?.message || err}` }));
+
+        // ── 断线原因：必须抢在引擎前面记录 ──────────────────────────────
+        // ★ 这是用户报障"bot 受伤后立刻退出、过一会儿又自己进来"查出来的真问题。
+        //   引擎自己在 vendor/mindcraft-develop/src/agent/agent.js:69-89 注册了
+        //     this.bot.once('kicked'|'end', (reason) => { …; process.exit(1); })
+        //   而这个注册发生在我们挂监听器**之前**（门是在 _setupEventHandlers 之后才装的）。
+        //   后果：引擎的回调先跑、直接 process.exit(1)，我们原来的
+        //     bot.on('kicked'|'end', …)
+        //   永远轮不到 —— 事件日志里 `mc/kicked`、`mc/end` 一条都没有，
+        //   面板上只剩引擎那行 `[LoginGuard] Disconnected: [object Object]`。
+        //   用 prependOnceListener 抢到最前面；event-log 是同步 appendFileSync，
+        //   所以哪怕下一毫秒进程就被 exit 掉，记录也已经落在磁盘上了。
+        const noteDisconnect = (kind, reason) => {
+            const cn = describeKick(reason);
+            const raw = (typeof reason === 'string' ? reason : JSON.stringify(reason ?? null)) || '';
+            emit('mc', { kind, reason: cn, raw: raw.slice(0, 400) });
+            emit('log', { level: 'warn', line: `[MCBOT-KICK] ${kind} ${cn}（原始：${raw.slice(0, 200)}）` });
+            console.log(`[MCBOT-KICK] ${kind} ${cn}（原始：${raw.slice(0, 300)}）`);
+        };
+        bot.prependOnceListener('kicked', (reason) => noteDisconnect('kicked', reason));
+        bot.prependOnceListener('end', (reason) => noteDisconnect('end', reason));
 
         // 补发：mineflayer 的 login/spawn 可能在上面这行之前就已经发过了。
         // 实测顺序是 "Xiaodou logged in!" → "Xiaodou spawned." → 本模块装上监听器，
