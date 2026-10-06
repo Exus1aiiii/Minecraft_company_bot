@@ -258,10 +258,12 @@ let bsText = '';
 try { bsText = fs.readFileSync(BOOTSTRAP, 'utf8'); } catch { }
 const PATCH_NEEDLES = [
   'incorrect_for_wooden_tool', 'timeout: 500', 'physicsTick', '0.175', "// console.log('Chunk size is",
+  'function noteBadMove', "// Don't send position with invalid coordinates (NaN after death)", 'respawnTimer',
+  '拦下一个非法移动包',
 ];
 const missingNeedles = PATCH_NEEDLES.filter((n) => !bsText.includes(n));
 must(
-  'bootstrap.mjs 保留了 5 条补丁证据串',
+  'bootstrap.mjs 保留了 9 条补丁证据串',
   missingNeedles.length === 0,
   `少的证据串：${missingNeedles.join(' / ')} —— 少了就查不出"补丁没打上"，装完是坏的却报成功`,
 );

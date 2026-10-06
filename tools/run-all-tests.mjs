@@ -60,6 +60,10 @@ const SUITES = [
     { name: 'test-speak', file: 'tools/test-speak.mjs', what: '引擎回执翻中文', expect: /全部通过/ },
     { name: 'test-self-report', file: 'tools/test-self-report.mjs', what: '用中文汇报坐标与背包', expect: /项通过/ },
     { name: 'test-kick-reason', file: 'tools/test-kick-reason.mjs', what: '被服务器断开时说出原因', expect: /项通过/ },
+    // 这套守的是"bot 上线十几秒后被服务器踢"那条真机 bug：把 mineflayer 的 physics.js
+    // 真的注入一个假 bot，确认 NaN 位置/朝向进不了网络包、死亡后不会立刻回 position_look。
+    // 它慢在"刻等 1.5 秒"（重生延迟那条），但守卫丢了会卡到 15 秒总闸报红。
+    { name: 'test-physics-guards', file: 'tools/test-physics-guards.mjs', what: '被杀前不发非法移动包', expect: /全部通过/ },
     { name: 'test-firstrun', file: 'devtools/test-firstrun.mjs', stub: true, what: '主人名单"配没配过"这条链路', expect: /项通过/ },
     { name: 'test-llm-errors', file: 'tools/test-llm-errors.mjs', stub: true, what: '大模型报错翻人话', expect: /全部通过/ },
     { name: 'check-imports', file: 'tools/check-imports.mjs', stub: true, what: '静态查"用了却没 import"', expect: /没有"用了却没 import"/ },

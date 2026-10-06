@@ -68,6 +68,10 @@ const ENGINE_PINS = {
 const PATCH_EVIDENCE = [
   { patch: 'mineflayer+4.33.0.patch（挖掘判定）', file: 'mineflayer/lib/plugins/digging.js', needle: 'incorrect_for_wooden_tool', why: '缺了它，用木镐挖错方块时的判定是错的' },
   { patch: 'mineflayer+4.33.0.patch（放方块等待）', file: 'mineflayer/lib/plugins/place_block.js', needle: 'timeout: 500', why: '缺了它，放方块要白等 5 秒' },
+  { patch: 'mineflayer+4.33.0.patch（非法移动包守卫）', file: 'mineflayer/lib/plugins/physics.js', needle: 'function noteBadMove', why: '缺了它，NaN 位置/朝向照样发出去，服务端以 Invalid move player packet 踢人' },
+  { patch: 'mineflayer+4.33.0.patch（死后 NaN 位置）', file: 'mineflayer/lib/plugins/physics.js', needle: "// Don't send position with invalid coordinates (NaN after death)", why: '缺了它，死亡瞬间那一帧的 NaN 坐标会被发出去' },
+  { patch: 'mineflayer+4.33.0.patch（重生回包延迟）', file: 'mineflayer/lib/plugins/physics.js', needle: 'respawnTimer', why: '缺了它，重生后立刻回 position_look，旧版服务端会直接踢' },
+  { patch: 'mineflayer+4.33.0.patch（中文日志没被写坏）', file: 'mineflayer/lib/plugins/physics.js', needle: '拦下一个非法移动包', why: '这条是中文：文件被存成 GBK 或 patch 被重写坏时，英文串可能还在，中文串会先烂掉' },
   { patch: 'mineflayer-pvp+1.3.2.patch', file: 'mineflayer-pvp/lib/PVP.js', needle: 'physicsTick', why: "上游把事件名拼成 physicTick，永不触发 → 打了补丁战斗插件才是活的" },
   { patch: 'mineflayer-pathfinder+2.4.5.patch', file: 'mineflayer-pathfinder/index.js', needle: '0.175', why: '到点容差 0.35→0.175：缺了它 bot 会在目标附近来回蹭' },
   { patch: 'protodef+1.19.0.patch', file: 'protodef/src/serializer.js', needle: "// console.log('Chunk size is", why: '缺了它，partial packet 会刷屏' },

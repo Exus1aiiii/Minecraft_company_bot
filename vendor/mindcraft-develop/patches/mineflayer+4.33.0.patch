@@ -52,3 +52,150 @@ index fdaec6b..08983b6 100644
          // Condition to wait to receive block update actually changing the block type, in case the bot receives block updates with no changes
          // oldBlock and newBlock will both be null when the world unloads
          checkCondition: (oldBlock, newBlock) => !oldBlock || !newBlock || oldBlock.type !== newBlock.type
+diff --git a/node_modules/mineflayer/lib/plugins/physics.js b/node_modules/mineflayer/lib/plugins/physics.js
+index 0bcf679..32b957d 100644
+--- a/node_modules/mineflayer/lib/plugins/physics.js
++++ b/node_modules/mineflayer/lib/plugins/physics.js
+@@ -76,6 +76,8 @@ function inject (bot, { physicsEnabled, maxCatchupTicks }) {
+   }
+ 
+   function tickPhysics (now) {
++    if (bot._client.state !== 'play') return // do nothing outside of the play state (e.g. server transfer configuration phase)
++    if (!bot.entity?.position || !Number.isFinite(bot.entity.position.x)) return // entity not ready
+     if (bot.blockAt(bot.entity.position) == null) return // check if chunk is unloaded
+     if (bot.physicsEnabled && shouldUsePhysics) {
+       physics.simulatePlayer(new PlayerState(bot, controlState), world).apply(bot)
+@@ -95,10 +97,32 @@ function inject (bot, { physicsEnabled, maxCatchupTicks }) {
+   function cleanup () {
+     clearInterval(doPhysicsTimer)
+     doPhysicsTimer = null
++    if (respawnReply) {
++      clearTimeout(respawnReply)
++      respawnReply = null
++    }
++  }
++
++  // MCBOT-PATCH：位置或朝向里一旦出现 NaN / Infinity，原样发出去会被服务端当成非法移动包，
++  // 直接以 multiplayer.disconnect.invalid_player_movement 踢人（日志里是
++  // "Invalid move player packet received"）。这里宁可少发一帧，也不要被踢，
++  // 并且把数值写进日志，方便下次一眼看出是谁传进来的坏值。
++  let lastBadMoveLogAt = 0
++  function noteBadMove (what, position, yaw, pitch) {
++    const now = Date.now()
++    if (now - lastBadMoveLogAt < 5000) return
++    lastBadMoveLogAt = now
++    const nums = [position && position.x, position && position.y, position && position.z, yaw, pitch].filter((v) => v !== null && v !== undefined)
++    console.error(`[MCBOT-PATCH] 拦下一个非法移动包（${what}）：数值 = ${nums.map((v) => String(v)).join(', ')} —— 发出去会被服务端踢，已跳过`)
+   }
+ 
+   function sendPacketPosition (position, onGround) {
+     // sends data, no logic
++    if (bot._client.state !== 'play') return
++    if (!Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(position.z)) {
++      noteBadMove('position', position, null, null)
++      return
++    }
+     const oldPos = new Vec3(lastSent.x, lastSent.y, lastSent.z)
+     lastSent.x = position.x
+     lastSent.y = position.y
+@@ -111,6 +135,11 @@ function inject (bot, { physicsEnabled, maxCatchupTicks }) {
+ 
+   function sendPacketLook (yaw, pitch, onGround) {
+     // sends data, no logic
++    if (bot._client.state !== 'play') return
++    if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) {
++      noteBadMove('look', null, yaw, pitch)
++      return
++    }
+     const oldPos = new Vec3(lastSent.x, lastSent.y, lastSent.z)
+     lastSent.yaw = yaw
+     lastSent.pitch = pitch
+@@ -122,6 +151,15 @@ function inject (bot, { physicsEnabled, maxCatchupTicks }) {
+ 
+   function sendPacketPositionAndLook (position, yaw, pitch, onGround) {
+     // sends data, no logic
++    if (bot._client.state !== 'play') return
++    if (!Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(position.z)) {
++      noteBadMove('position_look', position, yaw, pitch)
++      return
++    }
++    if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) {
++      noteBadMove('position_look（朝向）', position, yaw, pitch)
++      return
++    }
+     const oldPos = new Vec3(lastSent.x, lastSent.y, lastSent.z)
+     lastSent.x = position.x
+     lastSent.y = position.y
+@@ -153,6 +191,8 @@ function inject (bot, { physicsEnabled, maxCatchupTicks }) {
+   function updatePosition (now) {
+     // Only send updates for 20 ticks after death
+     if (isEntityRemoved()) return
++    // Don't send position with invalid coordinates (NaN after death)
++    if (!Number.isFinite(bot.entity.position.x)) return
+ 
+     // Increment the yaw in baby steps so that notchian clients (not the server) can keep up.
+     const dYaw = deltaYaw(bot.entity.yaw, lastSentYaw)
+@@ -322,6 +362,13 @@ function inject (bot, { physicsEnabled, maxCatchupTicks }) {
+   })
+ 
+   bot.look = async (yaw, pitch, force) => {
++    // MCBOT-PATCH：调用方传进来 NaN / undefined 角度时，绝不能把它加进 bot.entity.yaw ——
++    // 一旦被污染，之后每一帧都会发出带 NaN 的 look 包，服务端会持续踢人
++    // （mineflayer issue #1467 就是这么炸的：lookAt 写出 NaN pitch → 断线）。
++    if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) {
++      noteBadMove('look 请求（已忽略，未污染朝向）', null, yaw, pitch)
++      return
++    }
+     if (!lookingTask.done) {
+       lookingTask.finish() // finish the previous one
+     }
+@@ -415,14 +462,30 @@ function inject (bot, { physicsEnabled, maxCatchupTicks }) {
+     if (bot.supportFeature('teleportUsesOwnPacket')) {
+       bot._client.write('teleport_confirm', { teleportId: packet.teleportId })
+     }
+-    sendPacketPositionAndLook(pos, newYaw, newPitch, bot.entity.onGround)
+ 
+-    shouldUsePhysics = true
+-    bot.jumpTicks = 0
+-    lastSentYaw = bot.entity.yaw
+-    lastSentPitch = bot.entity.pitch
++    const confirmMove = () => {
++      shouldUsePhysics = true
++      bot.jumpTicks = 0
++      lastSentYaw = bot.entity.yaw
++      lastSentPitch = bot.entity.pitch
++      bot.emit('forcedMove')
++    }
+ 
+-    bot.emit('forcedMove')
++    // After death/respawn, delay the forced position_look response.
++    // Sending it immediately causes "Invalid move player packet" kicks
++    // on older servers, but the server needs it to complete the respawn.
++    if (respawnTimer > 0 && Date.now() - respawnTimer < 2000) {
++      respawnTimer = 0 // only delay once
++      respawnReply = setTimeout(() => {
++        respawnReply = null
++        sendPacketPositionAndLook(pos, newYaw, newPitch, false)
++        confirmMove()
++      }, 1500)
++      return
++    }
++
++    sendPacketPositionAndLook(pos, newYaw, newPitch, false)
++    confirmMove()
+   })
+ 
+   bot.waitForTicks = async function (ticks) {
+@@ -441,6 +504,12 @@ function inject (bot, { physicsEnabled, maxCatchupTicks }) {
+   }
+ 
+   bot.on('mount', () => { shouldUsePhysics = false })
++  let respawnTimer = 0
++  let respawnReply = null
++  bot.on('death', () => {
++    shouldUsePhysics = false
++    respawnTimer = Date.now()
++  })
+   bot.on('respawn', () => { shouldUsePhysics = false })
+   bot.on('login', () => {
+     shouldUsePhysics = false
