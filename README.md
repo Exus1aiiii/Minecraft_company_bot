@@ -55,7 +55,11 @@ Key 不对"分开报），日志在 `runtime\logs\`。踩过的坑都在下面�
 > ★ **本轮已实测把窗口开出来了**：这台机器上 Chromium 的沙箱起不来（`electron.exe --version`
 > 都是 `0x80000003`），启动器现在会**自动换一种方式重试**，窗口标题「MC 陪伴机器人」实测正常出现，
 > 界面八页、两台 bot 的配置都读出来了（原因与修法见坑表最后几行）。
-> 只想体检不想开窗口：`tools\launch-gui.ps1 -Check`（会顺便把沙箱能不能用报出来）。
+> **2026-10-06 用户在自己电脑上复验：窗口正常打开**，只在第一次看到那句黄色的沙箱提示；
+> 现在启动器会把这次结论记在 `runtime\sandbox-fallback.txt`，之后启动直接走「关掉沙箱」，
+> 屏幕上只留一行灰色的说明，不再重复报 0x80000003。
+> 只想体检不想开窗口：`tools\launch-gui.ps1 -Check`（会顺便把沙箱能不能用报出来；
+> 沙箱修好之后它会**自己清掉那份记忆**）。
 > 关键时间点：**2026-10-05** 引擎首次成功登录 MC 1.21.1 服务端；同日四项唤醒规则实测通过、token 计数链路打通。
 
 ## 文档
@@ -166,7 +170,7 @@ Key 不对"分开报），日志在 `runtime\logs\`。踩过的坑都在下面�
 | ★ **`.gitignore` 里含通配符的模式写错 = 静默不生效** | `runner/bots/*.launch.json`、`vendor/*.tar.gz` 这种"路径里带 `*`"的模式，我第一版匹配器把 `*` 直接留给了正则，于是它变成"零个或多个斜杠"——**模式等于没写**（那两样东西照样被判成"会提交"，`.launch.json` 里就是你的服务器地址）。凡是"靠模式匹配"的规则，都要**拿真样本反向验证一次**；`check-publish` 首跑报出来的"未忽略"就是靠这个抓到的 |
 | 块注释里出现 `*/` 会把注释**提前闭掉** | 我在注释里写了个 glob 示例 ``a/*/b*.json``，其中的 `*/` 直接结束了注释 → `SyntaxError: Unexpected token '.'`，报错行还指着注释**下面**那行。`node --check` 一秒就能抓到，别用"看起来是对的"糊过去 |
 | 隐私扫描工具**不能把要查的隐私值写死在自己身上** | 否则这个工具本身就是下一处泄漏（"列出 6 处带个人信息的地方"那份清单，自己就带着那 6 个值）。`tools/check-publish.mjs` 每次从 `runtime/config.json` **现读**服务器地址与主人名单，拿它们去搜要提交的文件 |
-| 🔴🔴 **`0x80000003` 不是"显卡不行"，是 Chromium 的沙箱在这台机器上起不来** | 症状：双击 `启动.cmd`，黑窗口里只有一句「Electron 自己没能启动起来（退出码 0x80000003）」，**配置和 Key 一点问题都没有**。取证：`electron.exe --version` → `0x80000003`、**完全没有 stderr 输出**（崩在 Chromium 打日志之前）；`electron.exe --version --no-sandbox` → 正常打印 `v44.5.1`；加上 `--no-sandbox` 跑本应用，窗口标题「MC 陪伴机器人」正常出现（主进程 + GPU + utility + 渲染，四个进程齐全）。`0x80000003` = `STATUS_BREAKPOINT`，即 Chromium 的 `IMMEDIATE_CRASH()`（`__debugbreak()`）—— **它表达的是 CHECK 失败，不是"显卡不支持"**。这台机器上跑着**腾讯电脑管家**（`QQPCRTP`）、且「内存完整性」（HVCI）是**开**的，两者都是 Chromium 沙箱的常见对手；`--disable-gpu` / `--disable-gpu-sandbox` / `--in-process-gpu` **都没用**（挂的是主进程那个沙箱）。修法：启动器**先按正常方式起，8 秒内看到 0x80000003 就自动换 `--no-sandbox` 再来一次**（实测崩在 1 秒内，探 8 秒足够；第一次仍保留沙箱，不因为一台机器的问题让所有人一起降级），并把原因和"怎么彻底修好"用人话打出来。`tools\launch-gui.ps1 -Check` 可以只体检、不开窗口 |
+| 🔴🔴 **`0x80000003` 不是"显卡不行"，是 Chromium 的沙箱在这台机器上起不来** | 症状：双击 `启动.cmd`，黑窗口里只有一句「Electron 自己没能启动起来（退出码 0x80000003）」，**配置和 Key 一点问题都没有**。取证：`electron.exe --version` → `0x80000003`、**完全没有 stderr 输出**（崩在 Chromium 打日志之前）；`electron.exe --version --no-sandbox` → 正常打印 `v44.5.1`；加上 `--no-sandbox` 跑本应用，窗口标题「MC 陪伴机器人」正常出现（主进程 + GPU + utility + 渲染，四个进程齐全）。`0x80000003` = `STATUS_BREAKPOINT`，即 Chromium 的 `IMMEDIATE_CRASH()`（`__debugbreak()`）—— **它表达的是 CHECK 失败，不是"显卡不支持"**。这台机器上跑着**腾讯电脑管家**（`QQPCRTP`）、且「内存完整性」（HVCI）是**开**的，两者都是 Chromium 沙箱的常见对手；`--disable-gpu` / `--disable-gpu-sandbox` / `--in-process-gpu` **都没用**（挂的是主进程那个沙箱）。修法：启动器**先按正常方式起，8 秒内看到 0x80000003 就自动换 `--no-sandbox` 再来一次**（实测崩在 1 秒内，探 8 秒足够；第一次仍保留沙箱，不因为一台机器的问题让所有人一起降级），并把原因和"怎么彻底修好"用人话打出来。**2026-10-06 补**：这句话每次启动都会重演一遍（对一台**已知**沙箱起不来的机器就是噪音），所以现在第一次试出来之后会写一份 `runtime\sandbox-fallback.txt`，之后直接按"关掉沙箱"启动、只留一行灰字说明；删掉那个文件（或跑 `-Check`，它会在沙箱恢复时自动删）就能重新试一次沙箱。`tools\launch-gui.ps1 -Check` 可以只体检、不开窗口 |
 | ★ **静态断言必须先把注释剥掉** | `check-launchers` 里那条"没有退回 `& $electron` 那种写法"，第一版直接对整个文件跑正则 —— 结果被启动器注释里那句「**绝对不能**写成 `& $electron $appDir`」判成违规（自己写下的反面教材把自己告了）。断言的对象是**代码**，不是文本：先剥掉整行 `#` 注释与 `<# #>` 块再判 |
 | ★ **自检注入的 `NODE_OPTIONS` 会把"体检"类子进程带偏，造出假绿** | `check-launchers` 第三节要用真的 `electron.exe` 探一次沙箱，而自检自己就是靠 `--import register-electron-stub.mjs` 跑的，这个变量会被子进程继承 —— 真 Electron 加载了那个 stub，于是 `--version` 打印出**stub 的假版本号 `v24.21.0`、退出码 0**，体检报告"沙箱正常"，而真相是这台机器沙箱根本起不来。**凡是要探测"没有我们的东西在场时会怎样"，都要先把我们注入的环境摘干净**（这里 `delete env.NODE_OPTIONS` / `ELECTRON_RUN_AS_NODE`；`launch-gui.ps1` 里同样先清这两个变量） |
 | 🔴 **本地测试服会随机把 mineflayer 客户端踢下线** | `testserver\logs\latest.log` 里 `lost connection` 的原因统计：`Disconnected` 237 次、`You logged in from another location` 2 次、**`Invalid move player packet received` 11 次**（测试玩家和我们的 bot 都会被踢，有一次 Steve 活了 1 秒）。后果不是"测试挂了"，而是**测试静默地失去观察能力**：`headless-multibot` 那条「A 的提示句数不对：期望 2 实得 1」查了半天，真相是 Steve 在收到第二句提示**之前**就被踢了，公屏一条都没收到 —— 断言数字是对的，错的是它把"我的测试玩家掉线"记成了产品缺陷。修法：测试客户端统一用 `makeTestPlayer()`（`end` 事件后 800ms 自动重连、`saw[]` 跨重连共享、`kicked` 记原因），`say()` 先等 `spawned` 再发（等不到就明说"这句话没发出去"，**绝不对着死客户端 `chat()`**），每条断言失败时贴一句 `kickNote()` 写明"期间被踢过几次、最后一次为什么" |

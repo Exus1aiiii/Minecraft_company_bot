@@ -85,6 +85,28 @@ if (-not (Test-Path $tmp)) { [void](New-Item -ItemType Directory -Force -Path $t
 $env:TEMP = $tmp
 $env:TMP = $tmp
 
+# ★ 记一件事：这台电脑上 Chromium 的沙箱起不起来。
+#   为什么要有这份"记忆"：沙箱起不来的机器（安全软件 / 内存完整性）每次双击都要先
+#   崩一次、再自动重试一次，用户每次都会看到那句黄色的 0x80000003 —— 对一台**已知**
+#   这样的机器，那是纯粹的噪音。所以第一次试出来之后写一份标记，之后直接按能用的
+#   方式启动；删掉这个文件 = 重新试一次沙箱（体检 -Check 会在沙箱恢复时自动删）。
+#   文件放在 runtime\ 下：不进仓库、跟着这台机器走。
+$fallbackFile = Join-Path $root 'runtime\sandbox-fallback.txt'
+
+function Write-SandboxFallback {
+  try {
+    $text = @(
+      'Chromium 的沙箱在这台电脑上起不来：带沙箱启动时 Electron 在第一步就退出（0x80000003）。',
+      '所以 启动.cmd 改用「关掉沙箱」的方式启动（--no-sandbox），界面照常可用。',
+      ('记录时间：' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')),
+      '',
+      '想重新试一次沙箱（例如已经把这个目录加进了安全软件的信任名单、或关掉了「内存完整性」）：',
+      '    删掉本文件，或跑 tools\launch-gui.ps1 -Check'
+    )
+    Set-Content -LiteralPath $fallbackFile -Value $text -Encoding UTF8
+  } catch { }
+}
+
 # ---------------------------------------------------------------------------
 # 跑一次 Electron 并**拿到它的退出码**（下面 -Check 和正式启动都要用）
 # ---------------------------------------------------------------------------
@@ -149,6 +171,10 @@ if ($Check) {
     $normal = Invoke-Electron '--version' 30000
     if ($normal.Code -eq 0) {
       Say ('  带沙箱启动   : OK（' + $normal.Out + '）') 'Green'
+      if (Test-Path $fallbackFile) {
+        try { Remove-Item -LiteralPath $fallbackFile -Force } catch { }
+        Say '  → 沙箱又能用了：已清掉"改用关掉沙箱启动"的记录，下次双击走带沙箱的默认方式。' 'Green'
+      }
     } else {
       Say ('  带沙箱启动   : 起不来，退出码 ' + (Format-HexCode $normal.Code)) 'Yellow'
       $fb = Invoke-Electron '--version --no-sandbox' 30000
@@ -156,9 +182,14 @@ if ($Check) {
         Say ('  关掉沙箱启动 : OK（' + $fb.Out + '）') 'Yellow'
         Say '  → 这台机器上 Chromium 的沙箱起不来（多半是安全软件，或系统的「内存完整性」）。' 'Yellow'
         Say '     不影响使用：双击 启动.cmd 时程序会自动改用「关掉沙箱」的方式，界面照样出得来。' 'Yellow'
+        if (-not (Test-Path $fallbackFile)) {
+          Write-SandboxFallback
+          Say '  → 已经记下来了：以后双击直接按"关掉沙箱"启动，不会再看到那句 0x80000003 的警告。' 'Yellow'
+        }
       } else {
         Say ('  关掉沙箱启动 : 也起不来，退出码 ' + (Format-HexCode $fb.Code)) 'Red'
         Say '     Electron 本身有问题：删掉 app\node_modules\electron 再 npm install 一次。' 'Red'
+        Say '     （这一条没有写进"记忆"：两种方式都起不来，说明原因不是沙箱。）' 'Red'
       }
     }
   }
@@ -325,9 +356,19 @@ $SANDBOX_CRASH = 0x80000003
 $code = 0
 $usedNoSandbox = $false
 $proc = $null
-for ($attempt = 0; $attempt -lt 2; $attempt++) {
+# ★ 记得上一次的结论：这台机器沙箱起不来就直接用"关掉沙箱"启动，
+#   省掉"先崩一次、再重试"的那 8 秒和那句吓人的黄色警告（见上面 Write-SandboxFallback）。
+$remembered = Test-Path $fallbackFile
+$attempts = @(0, 1)
+if ($remembered) { $attempts = @(1) }
+foreach ($attempt in $attempts) {
   $extra = ''
   if ($attempt -eq 1) { $extra = '--no-sandbox' }
+  if ($remembered) {
+    Say '（这台电脑上 Chromium 的沙箱起不来 —— 按上次的结论，这次直接用"关掉沙箱"的方式启动，不影响使用）' 'DarkGray'
+    Say '（想重新试一次沙箱：删掉 runtime\sandbox-fallback.txt，或跑 tools\launch-gui.ps1 -Check）' 'DarkGray'
+    Say ''
+  }
   $psi = New-ElectronStartInfo ('"' + $appDir + '"' + $(if ($extra) { ' ' + $extra } else { '' }))
   $proc = [System.Diagnostics.Process]::Start($psi)
 
@@ -336,6 +377,11 @@ for ($attempt = 0; $attempt -lt 2; $attempt++) {
     $proc.WaitForExit()
     $code = $proc.ExitCode
     if ($null -eq $code) { $code = 0 }
+    if (($attempt -eq 1) -and (-not $remembered)) {
+      Write-SandboxFallback
+      Say '（已记住：下次启动直接这样走，不会再重复尝试沙箱）' 'DarkGray'
+      Say ''
+    }
     break
   }
 
@@ -350,6 +396,11 @@ for ($attempt = 0; $attempt -lt 2; $attempt++) {
     Say '跟你填的服务器地址、API Key 没关系，也没有改动你的任何配置。'
     Say ''
     continue
+  }
+  # 走到这里 = 它在 8 秒内自己退了：既然"关掉沙箱"这条也走不通，就别再记着它，
+  # 免得下次启动静悄悄地失败、连那份两段式诊断都不打印。
+  if (($code -ne 0) -and (Test-Path $fallbackFile)) {
+    try { Remove-Item -LiteralPath $fallbackFile -Force } catch { }
   }
   break
 }

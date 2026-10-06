@@ -196,6 +196,24 @@ if (!ps1) {
     /Invoke-Electron[ \t]+['"]--version['"]/.test(code),
     '只看"文件在不在"查不出"文件在、一跑就崩"这个最常见的故障',
   );
+  // ★ 为什么还要管"记忆"：沙箱起不来的机器上，每次双击都要先崩一次再重试 ——
+  //   用户每次都会看到那句 0x80000003。对一台**已知**这样的机器那是噪音，
+  //   所以试出来之后要写一份标记，之后直接按能用的方式启动。
+  must(
+    '把「沙箱起不来」记在 runtime\\ 下（不进仓库）',
+    /Join-Path[ \t]+\$root[ \t]+'runtime\\sandbox-fallback\.txt'/.test(code),
+    '记到项目外面/仓库里都不对：它跟着这台机器走，也不该被提交',
+  );
+  must(
+    '记得之后就跳过"先崩一次"这个过程',
+    /\$remembered[ \t]*=[ \t]*Test-Path[ \t]+\$fallbackFile/.test(code),
+    '没有这一步，同一台机器每次启动都要重演一遍崩溃 + 黄色警告',
+  );
+  must(
+    '-Check 发现沙箱恢复时会清掉那份记忆',
+    code.includes('沙箱又能用了'),
+    '把项目加进杀软信任名单、或关掉「内存完整性」之后，用户应该能自己变回带沙箱启动',
+  );
 }
 let cmdText = '';
 try { cmdText = fs.readFileSync(CMD_ENTRY, 'utf8'); } catch { }
