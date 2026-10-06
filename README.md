@@ -92,6 +92,34 @@ Key 不对"分开报），日志在 `runtime\logs\`。踩过的坑都在下面�
 > 沙箱修好之后它会**自己清掉那份记忆**）。
 > 关键时间点：**2026-10-05** 引擎首次成功登录 MC 1.21.1 服务端；同日四项唤醒规则实测通过、token 计数链路打通。
 
+## 推送到 GitHub（双击 `推送到GitHub.cmd`）
+
+本地提交推不上去时，报的通常是这句：`Failed to connect to github.com:443 after 21101 ms: Could not connect to server`。
+**这不是 GitHub 挂了，也不是仓库配错** —— 是 git 的流量没走代理：这台机器的代理软件（Clash / Mihomo 一类）
+开在混合端口 `127.0.0.1:7897`，可 Windows 的「系统代理」开关是关的，而 **git 根本不看系统代理设置**
+（它只认 `http.proxy` / `https_proxy` 或环境变量），于是它直连 github.com:443，等到 21 秒后超时。
+
+修法已经写进这个仓库的 `.git/config`（**只对 github.com 生效**，不影响 gitee 等其它主机）：
+
+| 设置 | 值 | 为什么是这个值 |
+|---|---|---|
+| `http.https://github.com/.proxy` | `socks5h://127.0.0.1:7897` | 实测这个混合端口用 **HTTP** 代理协议会报 `SSL routines::unexpected eof while reading`，只有 `socks5h://` 通 |
+| `http.sslBackend` | `openssl` | 这台机器用默认的 schannel 报 `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`，换后端就能正常读写 GitHub |
+
+**双击 `推送到GitHub.cmd` 就行**（纯 ASCII 入口 → `tools\push-github.ps1`，中文提示都在 ps1 里）。
+它会：① 先告诉你有几个提交要推；② 推之前先探一次 7897 端口 —— 代理没开时立刻说"先把代理打开"，
+而不是让你白等 21 秒；③ 按报错说人话（要登录 GitHub / 连不上 / 远端比你新）；
+④ 撞上这台机器特有的 `schannel` 报错就自动换 openssl 后端再试一次。
+
+- 代理端口不是 7897：`推送到GitHub.cmd -ProxyPort 10808`（不用改脚本；**探通了才会写进配置** ——
+  端口填错一次不会把你的 `.git/config` 指向一个死端口）
+- 第一次推送会弹浏览器让你登录 GitHub（Git Credential Manager）；窗口弹不出来就用
+  「个人访问令牌」当密码（用户名写 `Exus1aiiii`，令牌勾 `repo` 或 `Contents: Read and write`）
+- 想撤销它写进 `.git/config` 的两条设置：
+  `git config --local --unset "http.https://github.com/.proxy"`、`git config --local --unset http.sslBackend`
+- 这条链路有 9 条不变量盯着（`tools\check-launchers.mjs`：纯 ASCII 入口、代理写法必须是 socks5h、
+  必须先探端口、先探通再写配置、严格模式、schannel 回退、失败原因要说人话）
+
 ## 文档
 
 | 文档 | 内容 |
@@ -247,6 +275,10 @@ Key 不对"分开报），日志在 `runtime\logs\`。踩过的坑都在下面�
 | ★ **`<input list=…>` 只写属性是不够的，`<datalist>` 必须挂进文档** | `app\renderer\ui.js` 的 `input()` 只返回 `<input>` 自己，把 `<datalist>` 建出来却不挂进 `document` 时**界面上不会有任何报错、下拉就是空的**。现在 `ensureDatalist()` 按内容 key 复用一个挂在 `document.body` 上的 `<datalist>`，并且 `render-headless` 第 7 节会 `getElementById(listId)` 验证它真在文档里。另外 `<input list>` 是**只读的对象属性**，要写 `el.setAttribute('list', id)`（`h()` 的"能赋值就赋值"在这条上会退化） |
 | 🔴 **用"数量差"判"有没有新增文件"会得出负数** | `tools\test-probe-outfile.mjs` 第一版断言 `孤儿数 === 修复前的孤儿数`，一次全量自检报出「这轮多出 **-1** 个孤儿日志」。因为那套自检把 `Date.now()` 换成"从同一基准每次 +997ms"，**每跑一次拿到同一批时间戳** → 上一轮遗留的孤儿 `.log` 这一轮被探出了同名 `.json`，于是"自愈"了。判据必须比**集合**（`added = after - before`），并允许历史痕迹被补齐。**负数永远说明判据写错了，不是产品坏了**（回归的表现是"多出一个新名字"，已用 `break-probe-outfile.mjs` 反向验证：红 3 行 + 3 个新孤儿） |
 | ★ **"数据核对过"不等于"真连过"，候选表要把两者分开标** | `mc-versions.mjs` 的 `DATA_VERIFIED_VERSIONS`（逐版本核对过名字与规则）故意比 `REAL_SERVER_VERSIONS`（真的登录过）长：`1.20.1` 目前只在左边。界面提示与文档都必须这么写，否则等于把希望当事实 |
+| 🔴 **`git push` 报 `Failed to connect to github.com:443 … Could not connect to server`** | 真因不是 GitHub 挂了，也不是仓库配错，而是**git 的流量根本没走本机代理**：代理软件开在 `127.0.0.1:7897`，但 Windows「系统代理」开关是关的，而 **git 不看系统代理**（只认 `http.proxy` / 环境变量）→ 直连 github.com 直到 21 秒超时。修法：仓库级 `http.https://github.com/.proxy = socks5h://127.0.0.1:7897`（只影响 github.com），以及 `http.sslBackend = openssl`（这台机器 schannel 报 `SEC_E_NO_CREDENTIALS`）。双击 `推送到GitHub.cmd` 也能做这件事 |
+| ★ **代理地址必须写 `socks5h://`，不能写 `http://`** | 同一个 `127.0.0.1:7897` 端口：`http.proxy=http://127.0.0.1:7897` → `TLS connect error: error:0A000126:SSL routines::unexpected eof while reading`；改成 `socks5h://127.0.0.1:7897` → `ls-remote` 正常。**端口号能连上 ≠ 这个代理协议能用** |
+| ★ **"探端口永远说没开"的伪装：变量名漏改 + 没有严格模式** | `tools\push-github.ps1` 加了 `-ProxyPort` 参数后，`Test-TcpPort $PROXY_HOST $PROXY_PORT` 这一行漏改（那两个变量已经不存在）→ 探端口恒为 `$false`，脚本每次都报"代理没在跑"，**窗口里一个字都不解释原因**。现在脚本开头 `Set-StrictMode -Version 2.0`：用了没定义的变量当场报错。这类"环境问题"最容易把用户指到错方向 |
+| ★ **要先探通代理、再写 git 配置** | 反过来的话，端口填错一次（负数验证就是这么干的：`-ProxyPort 7890`）就把 `socks5h://127.0.0.1:7890` **永久写进 `.git/config`** —— 之后用户自己手敲 `git push` 也被指到死端口上，比原来更难查。顺序也钉进了不变量 |
 
 ## 本机环境
 

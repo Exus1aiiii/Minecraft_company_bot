@@ -229,6 +229,57 @@ must(
   '入口没指向启动器的话，启动器改得再好也没用',
 );
 
+// ── 推送入口（推送到GitHub.cmd → tools\push-github.ps1）────────────────────
+// ★ 为什么这条链路也要钉住：用户报障「推送不了」，原话是
+//   Failed to connect to github.com:443 after 21101 ms: Could not connect to server。
+//   真因不是 GitHub 挂了，也不是仓库配错，而是**git 的流量根本没走本机代理**
+//   （Windows「系统代理」开关是关的，而 git 不看系统代理，只看 http.proxy / 环境变量）。
+//   这几条不变量钉的就是那次修的成果：仓库级代理要幂等写好、推之前先探端口（省掉那 20 秒
+//   干等）、撞上这台机器的 schannel 报错要能自动换后端再试一次。
+const PUSH_PS1 = path.join(ROOT, 'tools', 'push-github.ps1');
+const PUSH_CMD = path.join(ROOT, '推送到GitHub.cmd');
+let pushPsText = '';
+let pushCmdText = '';
+try { pushPsText = fs.readFileSync(PUSH_PS1, 'utf8'); } catch { }
+try { pushCmdText = fs.readFileSync(PUSH_CMD, 'utf8'); } catch { }
+must('tools\\push-github.ps1 存在（推送脚本）', fs.existsSync(PUSH_PS1),
+  '没有它，双击 推送到GitHub.cmd 会直接失败，用户又只能回到"手打 git push"那条老路');
+must('双击 推送到GitHub.cmd 真的会走到 push-github.ps1', /push-github\.ps1/.test(pushCmdText),
+  '入口没指向脚本的话，脚本写得再对也没人跑到');
+const pushCode = pushPsText ? stripPsComments(pushPsText) : '';
+must('推送脚本会幂等地写好本仓库的 GitHub 代理',
+  /config/.test(pushCode) && /http\.https:\/\/github\.com\/\.proxy/.test(pushCode),
+  '只对 github.com 生效的仓库级配置才是对的 —— 写全局会影响用户的 gitee 等其它主机');
+// ★ 这条特意钉**真正拿去用的那个值**，而不是"文件里出现过 socks5h"：
+//   第一版写的是"文件里有没有 socks5h://"，结果负数验证时把真值改成 http:// 它照样绿 ——
+//   因为另一个 `Say` 提示行里还留着一个 socks5h 的字面例子。断言的必须是会被执行的那一行。
+const WANT_PROXY_VALUE = 'socks5h://${ProxyHost}:${ProxyPort}';
+must('真正拿去用的代理地址是 socks5h://（不是 http://）',
+  pushCode.includes(WANT_PROXY_VALUE) && !pushCode.includes('http://${ProxyHost}'),
+  '实测这个 7897 混合端口走 HTTP 代理协议报 "unexpected eof while reading"，只有 socks5h 通');
+must('推之前先探一次代理端口（别让用户白等 20 秒）',
+  /TcpClient/.test(pushCode) && /BeginConnect/.test(pushCode) && /7897/.test(pushCode),
+  '用户那次就是代理没开：探端口能立刻说"先把代理打开"，而不是等 git 超时 21 秒后报一句英文');
+// ★ 顺序也要钉：**先探通再写配置**。反了的话，用户把端口填错一次就会把死端口永久写进
+//   .git/config，之后他手敲 git push 也被指到死端口上 —— 比原来还难查（实测踩到过）。
+const probeAt = pushCode.indexOf('Test-TcpPort $ProxyHost');
+const writeAt = pushCode.indexOf("'http.https://github.com/.proxy', $wantProxy");
+must('先探通代理、再写本仓库的代理配置（端口填错不会留下死配置）',
+  probeAt > 0 && writeAt > probeAt,
+  '写配置在前的话，一次填错端口就把 .git/config 指向死端口，用户自己 git push 也会跟着失败');
+// ★ 这条是"血的教训"落地：脚本第一版探端口那行漏改成新变量名（$PROXY_HOST 已不存在），
+//   于是探端口永远返回 false、每次都报"代理没在跑"，而窗口里一个字都不解释原因。
+//   严格模式会让"用了没定义的变量"当场报错。
+must('开了严格模式（用了没定义的变量会当场报错，而不是安静变成 $null）',
+  /Set-StrictMode/.test(pushCode),
+  '少了它，"变量名漏改"这种错会伪装成"你的代理没开"，用户按提示怎么弄都没用');
+must('撞上 schannel 会自动换 openssl 后端再试一次',
+  /schannel/.test(pushCode) && /http\.sslBackend/.test(pushCode),
+  '和启动器遇 0x80000003 自动换 --no-sandbox 同一个套路：环境问题不该让用户自己去猜');
+must('推送失败会把三种最常见的失败分别翻成人话',
+  /could not read Username/.test(pushCode) && /Failed to connect/.test(pushCode) && /non-fast-forward/.test(pushCode),
+  '英文报错对用户没有意义 —— 登录不了 / 连不上 / 远端比你新，要给三种不同的下一步');
+
 // ── 一键 bootstrap 链路 ────────────────────────────────────────────────────
 // ★ 为什么也要钉住：从 GitHub 下载的源码里**没有** Node 运行时、引擎依赖
 //   （714 MB）、Electron（380 MB）—— 它们都被 .gitignore 排除了。所以"下载下来
@@ -390,7 +441,7 @@ if (brokenInvariants.length) {
   console.log(`✗ 启动器内容不变量：${brokenInvariants.length} / ${invariants.length} 条被破坏了。`);
   process.exit(1);
 }
-console.log(`✓ 启动器内容不变量：${invariants.length} 条都还在（等进程 / 沙箱回退 / -Check 真跑 / 一键 bootstrap / 断线原因）。`);
+console.log(`✓ 启动器内容不变量：${invariants.length} 条都还在（等进程 / 沙箱回退 / -Check 真跑 / 一键 bootstrap / 推送走代理 / 断线原因）。`);
 
 // ============================================================================
 // 第二节之二：乱码哨兵（★ 这条是拿真事故换来的）
