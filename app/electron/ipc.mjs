@@ -318,11 +318,19 @@ export function registerIpc() {
     if (!host) return { ok: false, error: '服务器地址不能为空' };
     if (!Number.isFinite(port) || port <= 0 || port > 65535) return { ok: false, error: '端口必须是 1-65535' };
 
+    // ★ 这个名字只能算一次。以前是 `--out ...probe-${Date.now()}.json` 和
+    //   `outName: ...probe-${Date.now()}.json` **各算一次** —— 两次之间跨过一个毫秒时，
+    //   子进程把结果写到 A 文件、父进程去读 B 文件，读不到就报
+    //   「探测进程没有返回结果（详见 runtime\tmp 下的探测日志）」。
+    //   这不是"探测失败"，是**假红**：任何服务器（包括用户自己的线上服）都会偶发，
+    //   而且现场只剩一个 0 字节的 `probe-<另一个时间戳>.json.log`，
+    //   看着像子进程崩了。2026-10 就是靠这个孤儿 .log 抓到的。
+    const outName = `probe-${Date.now()}.json`;
     const args = [path.join(PROJECT_ROOT, 'tools', 'ping-server.mjs'), host, String(port)];
     if (version && version !== 'auto') args.push(version);
-    args.push('--out', path.join(TMP_DIR, `probe-${Date.now()}.json`));
+    args.push('--out', path.join(TMP_DIR, outName));
 
-    const res = await runTool(args, { outName: `probe-${Date.now()}.json`, timeoutMs: 20000 });
+    const res = await runTool(args, { outName, timeoutMs: 20000 });
     if (!res.ok) return translateProbeError(res);
     return { ok: true, ...res };
   });

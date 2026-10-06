@@ -64,6 +64,10 @@ const SUITES = [
     // 真的注入一个假 bot，确认 NaN 位置/朝向进不了网络包、死亡后不会立刻回 position_look。
     // 它慢在"刻等 1.5 秒"（重生延迟那条），但守卫丢了会卡到 15 秒总闸报红。
     { name: 'test-physics-guards', file: 'tools/test-physics-guards.mjs', what: '被杀前不发非法移动包', expect: /全部通过/ },
+    // 这套守的是"探测服务器时父进程读得到子进程写的那个文件"：把 Date.now 换成
+    // 每次 +997ms，让"毫秒边界"必然被跨过。名字只算一遍则必绿，算两遍则必红。
+    // 它护着的是**用户**：名字算两遍时他拿"探测"测自己的线上服也会偶发假红。
+    { name: 'test-probe-outfile', file: 'tools/test-probe-outfile.mjs', stub: true, what: '探测结果文件父进程读得到', expect: /全部通过/ },
     { name: 'test-firstrun', file: 'devtools/test-firstrun.mjs', stub: true, what: '主人名单"配没配过"这条链路', expect: /项通过/ },
     { name: 'test-llm-errors', file: 'tools/test-llm-errors.mjs', stub: true, what: '大模型报错翻人话', expect: /全部通过/ },
     { name: 'check-imports', file: 'tools/check-imports.mjs', stub: true, what: '静态查"用了却没 import"', expect: /没有"用了却没 import"/ },

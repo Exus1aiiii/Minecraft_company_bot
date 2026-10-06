@@ -205,6 +205,11 @@ Key 不对"分开报），日志在 `runtime\logs\`。踩过的坑都在下面�
 | ★ **守卫类补丁"注入假 bot 真跑"才算验证过** | 只查字符串证明不了守卫写在对的地方。`tools/test-physics-guards.mjs` 把 physics.js 真注入一个假 bot：NaN 朝向不发包、正常朝向照旧生效、NaN 传送不回声、死亡后 1.5 秒才补 `position_look`。另外给它一个**15 秒总闸**：守卫丢了的话 `await bot.look(NaN)` 会永远等一个不会来的事件，**卡死比报错难查**；总闸故意不 `unref()` —— 否则事件循环空掉时 Node 以 0 退出，会把"卡死"粉饰成"通过" |
 | ⚠️ **patch-package 要联网才能重生成，但原始文件可以在 npm 缓存里挖到** | `registry.npmjs.org` 不通时不要手工"反推"原始文件（我按字符串反向还原，行数多 1 行、`git hash-object` 与 diff 头里的 blob 对不上，当场被抓）。npm 缓存里有：`.npm-cache\_cacache\index-v5\…` 里 key 为 `make-fetch-happen:request-cache:<tarball URL>` 的记录给出 `integrity`，按 sha512 十六进制切成 `content-v2\sha512\<2>\<2>\<其余>` 就是那个 tarball，`tar -xzf` 即可。生成 diff 用 `git diff --output=<文件>`；临时仓库先 `git config core.autocrlf false` |
 | ⚠️ **`git diff > 文件` 用 PowerShell 写会变成 UTF-16LE** | `>` / `Out-File` 在 Windows PowerShell 5.1 下写出 UTF-16LE（读回来是 `��d i f f`），生成出来的 patch 直接废掉。用 `git diff --output=<文件>` 让 git 自己写 UTF-8 |
+| ★ **原版 MC 服务端在本沙箱起得来（Fabric 那条路才不行）** | 之前把"沙箱起不了 MC 服务端"当成了普遍结论，于是两套依赖真实服务端的自检长期停在"没跑"。实测：`runtime\jdk-21.0.12.1+1-jre\bin\java.exe -Xms1G -Xmx2G -jar testserver\server.jar nogui`（workdir `testserver`）→ `Done (1.521s)!`、25565 通；`testserver2\server.jar` → 25566 通。**纯原版 bundler jar 能跑**；起不来的是 Fabric（文件完整性标签）与"从外网下别的版本"（HTTPS 被换证书）。两套自检因此第一次真跑：`headless-multibot` 55 项全绿、`headless-multiserver` 31 项全绿 |
+| 🔴 **同一片绿里可能藏着"假绿"：断言写成 `A === B` 时 0 也等于 0** | `headless-multibot` 第 ⑥ 节原本是 `passes === llmCalls`，而假大模型（8799）没起时两个都是 0 → **空过**，自检照样报绿。现在必须 `llmCalls(totalA).length > 0`。凡是"数量相等""两边一致"这类断言，都要先问一句"**零能不能满足它**" |
+| 🔴 **测试用的假大模型没起，会被报成"链路断了"（假红）** | `headless-multiserver` 曾红一条 `✗ B 放行了却没有任何大模型调用`，真因只是 8799 没在跑。现在 section 0 先探端口，三种状态分开说：大模型调用 > 0 → 绿；端口在听但 0 次 → 红（真断链）；端口没开 → **"这条没跑"**（不是失败）。停掉 8799 重跑验证：绿、30 项；起回来：31 项绿 |
+| 🔴 **同一个文件名算两次 = 偶发假红，而且用户也会撞上** | `app\electron\ipc.mjs` 的 `server:probe` 里 `--out ...probe-${Date.now()}.json` 与 `outName: ...probe-${Date.now()}.json` **各算了一次**；跨过一个毫秒时子进程写 A、父进程读 B，读不到就报"探测进程没有返回结果"。用户点「探测」连自己的线上服时同样会偶发，而那句话与真实原因（地址写错？服务器没开？）毫无关系。**现场唯一指纹是父进程建的 0 字节 `probe-<另一个时间戳>.json.log`（有 .log 却没有同名 .json）**。修法：名字算一次两处共用；`tools\test-probe-outfile.mjs` 把 `Date.now` 换成"每次 +997ms"让边界必然被跨过，并断言"本轮没有新增孤儿日志" |
+| ⚠️ **负数验证要写成独立脚本文件，别在 PowerShell 里内联 `node -e` 带反引号的 JS** | 反引号会被 PS 吃掉 → 整条命令变语法错误（`Invalid left-hand side expression in postfix operation`），验证做不成还差点把 `app\electron\ipc.mjs` 写坏。这次用的是 `runtime\tmp\break-probe-outfile.mjs`（`backup` / `break` / `restore` 三个动作，用完删掉）。同类教训见 §195 "还原点必须是紧挨着这一次改动的快照" |
 
 ## 本机环境
 
@@ -301,8 +306,13 @@ $node = 'D:\mc_company_bot\runtime\node-v22.23.3-win-x64\node.exe'
 # ③b 万一配置真被改坏了，用这个修回来（默认只体检，加 --apply 才改）
 & $node tools\fix-config.mjs
 
-# ④ 启动测试服务端
+# ④ 启动测试服务端（multibot / multiserver 两套自检要真的登录它；后者还要 25566 那台）
 cmd /c "cd /d D:\mc_company_bot\testserver && <jre>\bin\java -Xmx2G -jar server.jar nogui > vanilla.log 2>&1"
+cmd /c "cd /d D:\mc_company_bot\testserver2 && <jre>\bin\java -Xmx2G -jar server.jar nogui > server2.log 2>&1"
+#   · 没起服时 run-all-tests 把这两套标成「没跑」（⊘，退出码 2）—— **未跑不等于通过**。
+#   · 同理，假大模型（⑥，8799）没在跑时，"放行次数 == 大模型调用次数"这条会标成「没跑」
+#     而不是报红。它会变成 0 == 0 的空过（假绿），报红又等于训练出"红的忽略就好"
+#     —— 两种都比"标成没跑"糟。
 
 # ⑤ 协议栈自检（离线）→ 服务器 ping 自检（需要服务端在跑）
 & $node tools\probe-protocol-stack.mjs 1.21.1

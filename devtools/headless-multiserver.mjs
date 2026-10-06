@@ -111,6 +111,15 @@ if (!(await portOpen(PORT_B, HOST_B))) {
 }
 ok(`${HOST_B}:${PORT_B} 在监听`);
 
+// ★ 第 4 节 ③ 要数"放行次数 == 大模型调用次数"，那得有人应答才算数。
+//   假大模型（`tools/mcbot-fake-llm.mjs`，默认 8799）没起的时候，这条断言**不成立也不该报红**
+//   —— 链路是通的，只是没人在另一端应答。报成红行会让人觉得"这些红的忽略就好"，
+//   而忽略红行恰恰是这套自检最赔不起的事（README「假红线比漏报还贵」那一条）。
+const llmPort = Number(new URL(LLM_URL).port || 80);
+const llmUp = await portOpen(llmPort, new URL(LLM_URL).hostname);
+if (llmUp) ok(`假大模型在跑（${LLM_URL}）`);
+else skip(`${LLM_URL} 没在跑 —— 第 4 节"放行 == 大模型调用"那条会标成没跑（不是失败）`);
+
 // ===========================================================================
 section('1. 准备"两台服务器 + 两个 bot"的配置');
 
@@ -311,7 +320,8 @@ if (playerUp) {
   const llmB = llmFor(botB.id).length;
   const llmA = llmFor(botA.id).length;
   if (llmB > 0) ok(`B 产生了 ${llmB} 次大模型调用（面板上的 token 就是从这条链路来的）`);
-  else fail('B 放行了却没有任何大模型调用 —— 链路断了');
+  else if (llmUp) fail('B 放行了却没有任何大模型调用 —— 链路断了');
+  else skip('B 放行了，但假大模型没在跑 —— 这条没跑（不是失败）');
   if (llmA === 0) ok('A 全程 0 次大模型调用 —— 跨服务器零串台');
   else fail(`A 产生了 ${llmA} 次大模型调用，它不该被服务器 B 上的话唤醒`);
 } else {

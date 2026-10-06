@@ -28,6 +28,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import net from 'node:net';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 
@@ -164,6 +165,20 @@ if (/api\.deepseek\.com|dashscope|openai\.com/i.test(LLM_URL)) {
   console.log(`拒绝用真实 API 跑自动测试（${LLM_URL}）`);
   process.exit(2);
 }
+
+// ★ 假大模型（`tools/mcbot-fake-llm.mjs`，默认 8799）在不在跑。
+//   第 ⑥ 节要断言"每次放行都对应一次大模型调用"，可如果没人应答，两个计数会一起是 0
+//   —— 那条断言就变成"0 == 0"的空过（假绿）。所以先探一次，没跑时把它标成"没跑"，
+//   而不是让它冒充通过。
+const llmUp = await new Promise((resolve) => {
+  const s = net.createConnection({ port: Number(new URL(LLM_URL).port || 80), host: new URL(LLM_URL).hostname });
+  const done = (v) => { try { s.destroy(); } catch {} resolve(v); };
+  s.setTimeout(1500);
+  s.once('connect', () => done(true));
+  s.once('timeout', () => done(false));
+  s.once('error', () => done(false));
+});
+if (!llmUp) console.log(`  · ${LLM_URL} 没在跑 —— 第 ⑥ 节"放行 == 大模型调用"会标成没跑（不是失败）`);
 
 // ---------------------------------------------------------------------------
 // 备份用户配置 —— 这个脚本必须能在跑完之后让用户毫无察觉
@@ -613,8 +628,9 @@ ok(`A 本次：门禁 ${gates(totalA).length} 条（放行 ${passes(totalA).leng
 ok(`B 本次：门禁 ${gates(totalB).length} 条（放行 ${passes(totalB).length}）、大模型 ${llmCalls(totalB).length} 次`);
 const tokA = totalA.filter((e) => e.type === 'llm' && e.phase === 'response').reduce((s, e) => s + (e.usage?.totalTokens || 0), 0);
 ok(`A 累计 ${tokA} tokens（面板上的数字就是从这条链路来的）`);
-if (passes(totalA).length === llmCalls(totalA).length) ok('A：每次放行都对应一次大模型调用（没有偷跑的调用）');
-else fail(`A：放行 ${passes(totalA).length} 次但大模型调了 ${llmCalls(totalA).length} 次 —— 有调用绕过了门`);
+if (passes(totalA).length === llmCalls(totalA).length && llmCalls(totalA).length > 0) ok('A：每次放行都对应一次大模型调用（没有偷跑的调用）');
+else if (!llmUp) console.log(`  · 假大模型没在跑，本轮大模型调用 ${llmCalls(totalA).length} 次 —— 这条没跑（不是失败）`);
+else fail(`A：放行 ${passes(totalA).length} 次但大模型调了 ${llmCalls(totalA).length} 次 —— 有调用绕过了门，或压根没调`);
 
 steve.close();
 
