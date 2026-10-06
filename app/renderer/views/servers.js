@@ -20,6 +20,10 @@ const AUTH_ITEMS = [
 export function render(container, ctx) {
   // 测试结果：serverId → { ok, text, detail }
   const probeResults = new Map();
+  // 版本号的判定结果：serverId → { ok, text, hint }
+  const versionNotes = new Map();
+  // 主进程给的候选版本表（拿不到就退回「auto + 默认版本」，界面照常能用）
+  let catalog = null;
 
   const head = h('div', { class: 'view-head' },
     h('span', { class: 'view-title' }, '服务器'),
@@ -31,14 +35,59 @@ export function render(container, ctx) {
 
   const listBox = h('div', { class: 'sunken-box', style: { padding: '0' } });
 
-  mount(container, head,
-    h('div', { class: 'notice info' },
-      '地址支持域名或 IP；端口默认 25565。版本填具体版本号（如 1.21.1），或填 auto 让引擎自动探测。',
-      h('br'),
-      '离线模式用于本机测试服；正版服务器需要微软账号登录，M1 界面里暂不收账号密码。'
-    ),
-    listBox
+  const noticeBox = h('div', { class: 'notice info' },
+    '地址支持域名或 IP；端口默认 25565。版本填具体版本号（输入框会列出我们认识的版本），拿不准就填 auto —— 填错的话这里会当场告诉你哪儿不对，不用等连接失败。',
+    h('br'),
+    '离线模式用于本机测试服；正版服务器需要微软账号登录，M1 界面里暂不收账号密码。'
   );
+
+  mount(container, head, noticeBox, listBox);
+
+  // -------------------------------------------------------------------------
+  // 版本
+  //
+  // 用户记不住版本号，而"填错版本"的报错在过去指向的是 ping.js 里一个 null
+  // （和版本号看上去毫无关系）。所以这里做两件事：输入框给候选；失焦时问主进程
+  // 这个版本行不行，然后把结论**如实**写在这一行下面（哪些真连过、哪些只核对过数据）。
+  // 这两件事都是"锦上添花"：主进程没响应也不影响填表和保存。
+  // -------------------------------------------------------------------------
+
+  async function loadCatalog() {
+    if (!window.mcbot?.mcVersionCatalog) return; // 演示 stub / 旧 preload
+    const res = await ctx.call('读取 MC 版本列表', () => window.mcbot.mcVersionCatalog(), { silent: true });
+    if (res?.ok) {
+      catalog = res;
+      renderList();
+    }
+  }
+
+  function versionCandidates() {
+    const known = (catalog?.options || []).map((o) => o.version);
+    // auto 永远在候选里：拿不准时它是最不容易错的一档
+    return ['auto', ...known.filter((v) => v !== 'auto')];
+  }
+
+  async function judgeVersion(srv) {
+    if (!window.mcbot?.judgeMcVersion) return;
+    const res = await ctx.call('检查版本号', () => window.mcbot.judgeMcVersion(srv.version), { silent: true });
+    if (!res) return;
+    versionNotes.set(srv.id, {
+      ok: Boolean(res.ok),
+      text: res.ok
+        ? `${res.mode === 'auto' ? '自动' : res.version}：${res.reason}`
+        : (res.reason || '这个版本号不行'),
+      hint: res.hint || '',
+    });
+    renderList();
+  }
+
+  function versionNoteEl(note) {
+    if (!note) return null;
+    return h('div', { class: `test-result${note.ok ? '' : ' bad'}`, style: { fontSize: '11px' } },
+      note.text,
+      note.hint ? h('div', { class: 'test-hint' }, note.hint) : null
+    );
+  }
 
   // -------------------------------------------------------------------------
   // 增删
@@ -102,6 +151,10 @@ export function render(container, ctx) {
         ok: false,
         text: res.error || '连接失败（未返回原因）',
         original: res.error === res.original ? '' : (res.original || ''),
+        // 版本号被拦下时主进程会带上"建议填什么"，这一行是关键
+        hint: res.hint || (Array.isArray(res.suggestions) && res.suggestions.length
+          ? `建议：${res.suggestions.join(' / ')}`
+          : ''),
       });
     } else {
       probeResults.set(srv.id, {
@@ -143,8 +196,18 @@ export function render(container, ctx) {
         })),
         h('td', {}, input({
           value: srv.version, placeholder: 'auto / 1.21.1', style: { width: '104px' },
-          onInput: (v) => { srv.version = v; ctx.markDirty(); },
-        })),
+          list: versionCandidates(),
+          onInput: (v) => {
+            srv.version = v;
+            versionNotes.delete(srv.id); // 值变了，上一条判定就不再代表这一行
+            ctx.markDirty();
+          },
+          onChange: (v) => {
+            srv.version = v;
+            ctx.markDirty();
+            void judgeVersion(srv);
+          },
+        }), versionNoteEl(versionNotes.get(srv.id))),
         h('td', {}, select(AUTH_ITEMS, {
           value: srv.auth,
           onChange: (v) => { srv.auth = v; ctx.markDirty(); },
@@ -174,6 +237,7 @@ export function render(container, ctx) {
             h('div', { class: `test-result${result.ok ? '' : ' bad'}`, style: { margin: '4px 0' } },
               h('span', null, result.text),
               result.original ? h('div', { class: 'test-hint' }, `原始报错：${result.original}`) : null,
+              result.hint ? h('div', { class: 'test-hint' }, result.hint) : null,
               detail && detail.motd ? h('div', null, `MOTD：${detail.motd}`) : null,
               detail && detail.players
                 ? h('div', { class: 'mono' }, `在线人数：${detail.players.online} / ${detail.players.max}`)
@@ -200,5 +264,6 @@ export function render(container, ctx) {
   function update() { /* 本页只看配置，runtime 事件不需要重绘 */ }
 
   renderList();
+  void loadCatalog();
   return { update };
 }

@@ -164,7 +164,8 @@ const channels = ipcMain.channels();
 ok(`注册了 ${channels.length} 个 IPC channel`);
 const required = [
   'env:get', 'config:get', 'config:save', 'secret:set', 'secret:clear', 'llm:test',
-  'server:probe', 'bots:list', 'bot:start', 'bot:stop', 'bot:restart', 'bot:stopAll',
+  'server:probe', 'versions:catalog', 'versions:judge',
+  'bots:list', 'bot:start', 'bot:stop', 'bot:restart', 'bot:stopAll',
   'log:read', 'stats:clear', 'skin:pick', 'skin:read', 'personas:list',
   'memory:get', 'memory:add', 'memory:forget', 'memory:clear',
   'app:openExternal', 'app:pickDirectory', 'app:versions', 'app:defaults',
@@ -262,7 +263,19 @@ else fail('openExternal 没有拦住非 http(s) 的 URL：' + JSON.stringify(r6)
   if (p3?.ok === false && /1-65535/.test(String(p3.error))) ok(`端口越界被当场拦住："${p3.error}"`);
   else fail('端口越界没拦住：' + JSON.stringify(p3));
 
-  // ④ 真服务器（优先挑本机那台）。没在跑就跳过，不判失败 ——
+  // ④ 版本填错时**在连接之前**就说清楚 —— 这是"换服务器版本"这条链的第一道闸。
+  //    引擎在版本没数据时的报错是 `Cannot read properties of null (reading 'version')`
+  //    （指向 ping.js），和用户填的版本号看起来毫无关系，所以绝不能等到那时候。
+  const vBad = await ipcMain.invoke('server:probe', { host: '127.0.0.1', port: deadPort, version: '1.20.11' });
+  if (vBad?.ok === false && /版本|想填/.test(String(vBad.error) + String(vBad.hint))) {
+    ok(`版本填错时不去连，直接说人话："${vBad.error}" / "${vBad.hint}"`);
+  } else {
+    fail('版本填错没有被提前拦住：' + JSON.stringify(vBad)?.slice(0, 200));
+  }
+  if (Array.isArray(vBad?.suggestions) && vBad.suggestions.includes('1.20.1')) ok(`★ 顺手猜一下用户想填哪个：${vBad.suggestions.join(' / ')}`);
+  else fail('没给出候选版本：' + JSON.stringify(vBad?.suggestions));
+
+  // ⑤ 真服务器（优先挑本机那台）。没在跑就跳过，不判失败 ——
   //    这套自检不该因为"本机服务器没开"或"网线拔了"而整体变红。
   //    ★ 以前写的是 servers[0]：用户后来把自己的线上服加进配置并排在前面，
   //      这行就去探测他的真服务器了 —— 探到了固然好，但他一断网，
@@ -276,6 +289,34 @@ else fail('openExternal 没有拦住非 http(s) 的 URL：' + JSON.stringify(r6)
     ok(`真服务器 ${realSrv.host}:${realSrv.port} 连不上，跳过这条（不算失败）`);
   } else {
     fail('探测真服务器的返回不对：' + JSON.stringify(p4)?.slice(0, 200));
+  }
+}
+
+// —— 「服务器版本」这条链：候选表 + 判定 ——
+// 用户换服务器时最先踩的就是版本：填了个协议库认识、我们没数据的版本，报错却指向
+// ping.js 里一个 null。所以这条链的每一句话都必须是中文人话。
+{
+  const cat = await ipcMain.invoke('versions:catalog');
+  if (cat?.ok && Array.isArray(cat.options) && cat.options.length > 0) {
+    ok(`版本候选表：${cat.options.length} 个可选，默认 ${cat.default}（核对过 ${cat.dataVerified?.length ?? 0} 个，真连过 ${cat.realServer?.length ?? 0} 个）`);
+  } else {
+    fail('versions:catalog 返回不对：' + JSON.stringify(cat)?.slice(0, 160));
+  }
+  if (cat?.options?.some((o) => o.realServer && !o.tested)) fail('候选表把"真连过"的版本标成了"没核对过数据" —— 这两个说法不能互相矛盾');
+  else ok('候选表区分了"真连过"和"只核对过数据"');
+
+  const j1 = await ipcMain.invoke('versions:judge', 'auto');
+  if (j1?.ok && j1.version) ok(`versions:judge('auto') → ${j1.version}（协议 ${j1.protocol}）`);
+  else fail('versions:judge(auto) 返回不对：' + JSON.stringify(j1));
+
+  const j2 = await ipcMain.invoke('versions:judge', '1.20.1');
+  if (j2?.ok === true && typeof j2.tested === 'boolean') {
+    ok(`versions:judge('1.20.1') → 能用，协议 ${j2.protocol}，数据核对过=${j2.tested}，真连过=${j2.realServer}`);
+    if (j2.tested && !j2.realServer && /连过/.test(String(j2.hint))) ok('★ "核对过但没真连过"会如实写在界面上（不假装全都验过）');
+    else if (!j2.tested) ok('1.20.1 还没被登记成"核对过" —— 那 test-versions 的绿就不算数');
+    else fail('1.20.1 缺了"没真连过"的提醒：' + String(j2.hint));
+  } else {
+    fail("versions:judge('1.20.1') 返回不对：" + JSON.stringify(j2)?.slice(0, 200));
   }
 }
 

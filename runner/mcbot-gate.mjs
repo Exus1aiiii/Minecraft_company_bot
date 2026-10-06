@@ -38,6 +38,7 @@ import { Memory, memoryFileFor, parseRememberIntent, parseRecallIntent, extractF
 import { translateEngineReply } from './engine-speak.mjs';
 import { describeKick } from './kick-reason.mjs';
 import { formatStats, formatInventory, biomeCn, LOCAL_REPORTS } from './self-report.mjs';
+import { DEFAULT_VERSION } from './mc-versions.mjs';
 import {
     parseCraftIntent, craftLabel, planFor, runPlan, canCraft, describeNeeds,
     poolFrom, have, bestTool, resolvePlanks, PICKAXE_FOR, TOOL_TIERS, BLOCK_TOOL,
@@ -147,8 +148,8 @@ if (!rawConfig) {
     const rateLimitMs = Number.isFinite(config.rateLimitMs) ? config.rateLimitMs : 5000;
     const dailyTokenBudget = Number.isFinite(config.dailyTokenBudget) ? config.dailyTokenBudget : 0;
     const rules = Array.isArray(config.rules) ? config.rules : [];
-    /** 目标 MC 版本，由启动器通过 `MCBOT_MC_VERSION` 传进来。 */
-    const MC_VERSION = process.env.MCBOT_MC_VERSION || '1.21.1';
+    /** 目标 MC 版本，由启动器通过 `MCBOT_MC_VERSION` 传进来；没传就落回唯一来源那个默认值。 */
+    const MC_VERSION = process.env.MCBOT_MC_VERSION || DEFAULT_VERSION;
 
     if (owners.length === 0) {
         console.warn('[MCBOT-GATE] WARNING: owners list is empty — every chat message will be ignored (fail closed).');

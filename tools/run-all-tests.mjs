@@ -53,6 +53,10 @@ const SUITES = [
     { name: 'headless-multibot', file: 'devtools/headless-multibot.mjs', stub: true, needsLocalServer: true, what: '两个 bot 同时在线', expect: /全部通过/ },
     { name: 'headless-multiserver', file: 'devtools/headless-multiserver.mjs', stub: true, needsLocalServer: true, what: '两台服务器同时在线', expect: /全部通过/ },
     { name: 'test-vocab', file: 'tools/test-vocab.mjs', what: '中文方块词 / 数量 / 意图解析', expect: /全部通过/ },
+    // 这套守的是"换一个 MC 版本还能不能用"：逐版本核对**按名字写死**的那些表
+    // （方块名、物品名、合成原料、烧炼原料、挖掘规则）。名字写错在运行时才炸，
+    // 而且报的是 `Invalid block type` 这种离用户很远的话。
+    { name: 'test-versions', file: 'tools/test-versions.mjs', what: '按 MC 版本核对名字与规则', expect: /全部通过/ },
     { name: 'test-builder', file: 'tools/test-builder.mjs', what: '找地基 / 盖房子', expect: /全部通过/ },
     { name: 'test-explorer', file: 'tools/test-explorer.mjs', what: '探索距离与分腿寻路', expect: /全部通过/ },
     { name: 'test-memory', file: 'tools/test-memory.mjs', what: '长期记忆读写与检索', expect: /全部通过/ },

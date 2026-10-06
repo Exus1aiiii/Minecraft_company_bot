@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { describeProtocolStack } from './engine-patches.mjs';
 import { createEventLog } from './event-log.mjs';
 import { getPersona, buildSystemPrompt } from './personas/index.mjs';
+import { DEFAULT_VERSION } from './mc-versions.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -227,7 +228,8 @@ const settings = {
     port: String(spec.server.port),
     auth: spec.server.auth || 'offline',
     // 锁死版本：mineflayer 自动探测会多一次 ping，且目标版本是本项目的既定选择。
-    minecraft_version: spec.server.version || '1.21.1',
+    // 没填就落回 mc-versions.mjs 的默认版本（唯一来源，别再在这里写字面量）。
+    minecraft_version: spec.server.version || DEFAULT_VERSION,
     // 每个 bot 一个进程 = 一个 MindServer，端口必须错开，否则第二个 bot 起不来。
     mindserver_port: await findFreePort(spec.mindserverPort ?? 8080),
     auto_open_ui: false,

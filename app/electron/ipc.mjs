@@ -21,6 +21,7 @@ import { hub } from './events.mjs';
 import { supervisor } from './supervisor.mjs';
 import { listPersonas } from '../../runner/personas/index.mjs';
 import { Memory } from '../../runner/memory.mjs';
+import { judgeVersion, describeVersionOptions } from '../../runner/mc-versions.mjs';
 
 const SKIN_EXTS = ['png'];
 
@@ -310,6 +311,28 @@ export function registerIpc() {
     } catch (e) { return { ok: false, error: `测试失败：${e.message}` }; }
   });
 
+  // ── MC 版本：能填哪些、填的这个行不行 ──
+  // 放在"服务器"之前是故意的：版本填错的报错会落在**连接之前**，而且引擎报的是
+  // `TypeError: Cannot read properties of null (reading 'version')`（指向 ping.js），
+  // 与用户填的那个版本号看起来毫无关系。所以要在界面上先说清楚。
+  ipcMain.handle('versions:catalog', () => {
+    try {
+      const cat = describeVersionOptions();
+      if (!cat.ok) return { ok: false, error: cat.error || '读不到版本表', hint: '先跑 node tools\\bootstrap.mjs 把引擎依赖装齐' };
+      return cat;
+    } catch (e) { return { ok: false, error: `读不到版本表：${e.message}` }; }
+  });
+
+  ipcMain.handle('versions:judge', (_e, raw) => {
+    try { return judgeVersion(raw); }
+    catch (e) {
+      return {
+        ok: false, raw: String(raw ?? ''), mode: 'unknown', suggestions: [],
+        reason: `版本判定失败：${e.message}`, hint: '',
+      };
+    }
+  });
+
   // ── 服务器探测 ──
   ipcMain.handle('server:probe', async (_e, server) => {
     const host = String(server?.host || '').trim();
@@ -317,6 +340,10 @@ export function registerIpc() {
     const version = String(server?.version || '').trim();
     if (!host) return { ok: false, error: '服务器地址不能为空' };
     if (!Number.isFinite(port) || port <= 0 || port > 65535) return { ok: false, error: '端口必须是 1-65535' };
+
+    // 版本先判一遍：不认识就**别去连**了 —— 连了也只会得到一个与版本无关的报错。
+    const judge = judgeVersion(version);
+    if (!judge.ok) return { ok: false, error: judge.reason, hint: judge.hint, suggestions: judge.suggestions, judge };
 
     // ★ 这个名字只能算一次。以前是 `--out ...probe-${Date.now()}.json` 和
     //   `outName: ...probe-${Date.now()}.json` **各算一次** —— 两次之间跨过一个毫秒时，
@@ -327,12 +354,13 @@ export function registerIpc() {
     //   看着像子进程崩了。2026-10 就是靠这个孤儿 .log 抓到的。
     const outName = `probe-${Date.now()}.json`;
     const args = [path.join(PROJECT_ROOT, 'tools', 'ping-server.mjs'), host, String(port)];
-    if (version && version !== 'auto') args.push(version);
+    // 只有"用户明确填了一个版本"才锁版本；auto/空 让探测自己去看服务端是什么版本。
+    if (judge.mode === 'explicit') args.push(judge.version);
     args.push('--out', path.join(TMP_DIR, outName));
 
     const res = await runTool(args, { outName, timeoutMs: 20000 });
     if (!res.ok) return translateProbeError(res);
-    return { ok: true, ...res };
+    return { ok: true, ...res, judge };
   });
 
   // ── bot 生命周期 ──

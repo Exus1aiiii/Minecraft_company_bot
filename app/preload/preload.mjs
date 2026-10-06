@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld('mcbot', {
 
   // ── 服务器 ──
   probeServer: (server) => invoke('server:probe', server),
+  // MC 版本：`mcVersionCatalog()` 拿候选表，`judgeMcVersion(raw)` 判用户填的这一串行不行。
+  // 注意别和上面的 getVersions() 搞混 —— 那个是 Electron/Node 自己的版本号。
+  mcVersionCatalog: () => invoke('versions:catalog'),
+  judgeMcVersion: (raw) => invoke('versions:judge', raw),
 
   // ── bot 生命周期 ──
   listBots: () => invoke('bots:list'),

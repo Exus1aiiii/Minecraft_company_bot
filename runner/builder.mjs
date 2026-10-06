@@ -20,7 +20,14 @@
 //   3. 一块一块地放，中途可以被打断（`bot.interrupt_code`）。
 // ============================================================================
 
-const AIR_LIKE = new Set(['air', 'cave_air', 'void_air', 'water', 'lava', 'short_grass', 'tall_grass', 'grass', 'snow', 'dead_bush', 'fern']);
+/**
+ * 找地基时可以踩/可以穿过去的方块名（挑地点、判断地面平不平都靠它）。
+ *
+ * ⚠️ 这里面**必须同时有 `grass` 和 `short_grass`**：Minecraft 1.20.1 那株矮草叫
+ * `grass`，1.21.1 改名成了 `short_grass`（1.20.1 上根本没有 `short_grass` 这个方块）。
+ * 导出出去是为了让 `tools/test-versions.mjs` 能逐版本核对这张表。
+ */
+export const AIR_LIKE = new Set(['air', 'cave_air', 'void_air', 'water', 'lava', 'short_grass', 'tall_grass', 'grass', 'snow', 'dead_bush', 'fern']);
 
 /** 木屋尺寸预设。"帮我盖个小屋" -> small，"盖个大点的" -> big。 */
 export const HUT_PRESETS = {

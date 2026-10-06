@@ -169,6 +169,15 @@ this['>='] = other => versions[other] ? v1 >= versions[other].dataVersion : rais
 
 > **教训**：钉死补丁涉及的包时，**必须先校验它没有被压到下游依赖声明的最低要求之下**。`tools/probe-protocol-stack.mjs` 的第 3 条判据就是专门查这个的 —— 以后每次改依赖版本都跑一遍。
 
+> **版本修订（2026-10-06，多版本兼容那一轮）**：上面第二节记录的"`defaultVersion = '26.1'`，
+> 而 `minecraft-data@3.97.0` 最高只到 1.21.8 → `require('minecraft-data')('26.1')` 返回 null →
+> `createClient.js:30` 抛 `unsupported protocol version: 26.1`"**是当时（3.97.0）的真实结论，现在已不成立**：
+> 依赖漂移后 `minecraft-data` 已经是 **3.117.0**，实测 `minecraft-protocol` 的 `supportedVersions`
+> 共 30 个（`1.7 … 26.1`），**每一个都有对应数据**（`describeProtocolStack()` 现在报
+> `supported=30 / known=30 / unknown=[]`，`26.1` = protocol 775、1168 blocks / 1506 items / 887 recipes），
+> 所以 V-3 守卫**从"救命的必需项"变成"纯保险"**（印在脑子里的那句"任何版本的连接都会抛 `RangeError`"
+> 也要一起更新）。守卫本身留着 —— 依赖再漂一次时它是唯一还站着的那道闸。
+
 ---
 
 ## 四、Node 版本：**22 LTS**（不是 README 说的 18/20）

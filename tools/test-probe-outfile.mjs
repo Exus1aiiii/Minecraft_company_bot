@@ -83,8 +83,24 @@ for (let i = 1; i <= 3; i += 1) {
 section('3. 这轮探测没有新增孤儿日志（父进程读的文件名 == 子进程写的文件名）');
 Date.now = realNow;
 const orphansAfter = orphans();
-if (orphansAfter.length === orphansBefore.length) ok(`孤儿日志没有新增（仍是修复前那 ${orphansBefore.length} 个）`);
-else fail(`这轮多出 ${orphansAfter.length - orphansBefore.length} 个孤儿日志：${orphansAfter.filter((f) => !orphansBefore.includes(f)).join(', ')} —— 文件名多半又算了两遍`);
+
+// ★ 判据必须是**集合差**，不能是**数量差**。
+//   第一版写的是 `orphansAfter.length === orphansBefore.length`，2026-10 的一次全量
+//   自检里它报出「这轮多出 -1 个孤儿日志」—— 一个**负数**。数字一看就不对，说明
+//   判据本身错了：这个自检把 `Date.now()` 换成"从同一个基准每次 +997 毫秒"，
+//   于是**每跑一次都会拿到同一批时间戳**。上一轮遗留的孤儿
+//   `probe-1700000000xxx.json.log`（当初没有同名 .json）在这一轮被探出了同名的
+//   .json，孤儿就"自愈"了 —— 文件确实是少了，可它跟这一轮有没有 bug 毫无关系。
+//   而**回归**是"多出一个新名字"，所以只认 added。负数量永远不该让自检变红：
+//   它证明的是判据写错了，不是产品坏了。
+const added = orphansAfter.filter((f) => !orphansBefore.includes(f));
+const healed = orphansBefore.filter((f) => !orphansAfter.includes(f));
+if (added.length === 0) {
+  ok(`孤儿日志没有新增（${orphansBefore.length} 个历史孤儿`
+    + (healed.length ? `，其中 ${healed.length} 个这轮补齐了同名 .json` : '') + '）');
+} else {
+  fail(`这轮多出 ${added.length} 个孤儿日志：${added.join(', ')} —— 文件名多半又算了两遍`);
+}
 
 // 顺带确认这次跑出来的文件里确实有真结果，而不是"空文件也算过"
 const done = fs.readdirSync(paths.TMP_DIR)

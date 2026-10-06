@@ -621,6 +621,55 @@ export function createMockApi() {
       };
     },
 
+    // ── MC 版本（演示模式：下面这份候选表是**假的**）──
+    // 真跑起来时这些都由 runner/mc-versions.mjs 回答；渲染进程不能 import 它
+    // （那个模块要用 node: 的东西），所以演示模式里只放"长得像"的几个版本。
+    // 演示数据也要说人话：`tested`/`realServer`/`note` 三样都得有。
+    async mcVersionCatalog() {
+      await delay(30);
+      return {
+        ok: true,
+        default: '1.21.1',
+        dataVerified: ['1.20.1', '1.21.1'],
+        realServer: ['1.21.1'],
+        options: [
+          { version: '1.21.1', protocol: 767, tested: true, realServer: true, note: '我们真连过' },
+          { version: '1.20.1', protocol: 763, tested: true, realServer: false, note: '数据核对过' },
+          { version: '1.20.4', protocol: 765, tested: false, realServer: false, note: '没核对过' },
+        ],
+      };
+    },
+
+    async judgeMcVersion(raw) {
+      await delay(30);
+      const s = String(raw ?? '').trim();
+      const cat = await this.mcVersionCatalog();
+      if (!s || /^(auto|自动|随便|默认)$/i.test(s)) {
+        return {
+          ok: true, raw: s, version: '1.21.1', mode: 'auto', protocol: 767,
+          tested: true, realServer: true, suggestions: [],
+          reason: '自动：用 1.21.1（协议 767）',
+          hint: '「自动」不会去猜服务器的版本 —— 引擎在连接时按服务端回包自己纠正。',
+        };
+      }
+      const hit = cat.options.find((o) => o.version === s);
+      if (hit) {
+        return {
+          ok: true, raw: s, version: hit.version, mode: 'explicit', protocol: hit.protocol,
+          tested: hit.tested, realServer: hit.realServer, suggestions: [],
+          reason: `${hit.version} 可以（协议 ${hit.protocol}）`,
+          hint: hit.tested && !hit.realServer
+            ? `它的方块/配方我们逐条核对过，但**没有真的连过 ${hit.version} 服务器**。`
+            : '',
+        };
+      }
+      return {
+        ok: false, raw: s, mode: 'explicit', suggestions: [],
+        reason: `「${s}」不是已知的版本号`,
+        hint: '可用的版本（有数据的）：1.21.1 / 1.20.1 / 1.20.4；不想挑就填 auto。',
+      };
+    },
+
     // ── 服务器 ──
     async probeServer({ host, port, version }) {
       await delay(400 + Math.random() * 700);
@@ -631,12 +680,16 @@ export function createMockApi() {
       if (/example\.com|^10\.|^192\.168/.test(h) && !/^(127\.0\.0\.1|localhost)$/.test(h)) {
         return { ok: false, error: `连接超时：${h}:${p} 在 5000ms 内没有响应（服务器未开或防火墙拦截）` };
       }
+      // 版本填错时和真主进程一样：**不去连**，直接说人话（这道闸在连接之前）。
+      const judge = await this.judgeMcVersion(version);
+      if (!judge.ok) return { ok: false, error: judge.reason, hint: judge.hint, suggestions: judge.suggestions, judge };
       return {
         ok: true,
-        version: version && version !== 'auto' ? version : '1.21.1',
-        protocol: 767,
+        version: judge.version,
+        protocol: judge.protocol || 767,
         motd: '§a一个 Minecraft 服务器 §7| §e1.21.1 · Fabric',
         players: { online: 1, max: 20 },
+        judge,
       };
     },
 

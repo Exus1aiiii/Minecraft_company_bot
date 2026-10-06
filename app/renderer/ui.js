@@ -355,6 +355,10 @@ export function field(label, opts = {}) {
 /**
  * 裸输入框（不带 label 包裹），用于表格单元格等紧凑位置。
  * 返回的就是 <input> 本身，方便直接塞进 <td>。
+ *
+ * opts.list 传一个字符串数组时会给输入框接上浏览器自带的候选下拉（<datalist>）。
+ * 用它的理由：MC 版本号这种东西用户记不住，但又不该做成只能选的下拉框
+ * —— 允许他手打一个我们没登记过的版本，我们再如实告诉他行不行。
  */
 export function input(opts = {}) {
   const {
@@ -368,10 +372,11 @@ export function input(opts = {}) {
     disabled,
     mono = true,
     title,
+    list,
     onInput,
     onChange,
   } = opts;
-  return h('input', {
+  const el = h('input', {
     class: ['input', mono ? 'mono' : ''],
     type,
     value: value === null || value === undefined ? '' : String(value),
@@ -387,6 +392,40 @@ export function input(opts = {}) {
       change: onChange ? (e) => onChange(e.target.value, e) : undefined,
     },
   });
+  if (Array.isArray(list) && list.length) {
+    const id = ensureDatalist(list);
+    // 注意：input.list 这个 DOM 属性只读，直接赋值（h 的"能赋值就赋值"那条路）
+    // 在这里会退化成 setAttribute —— 但语义正合我们意，所以干脆显式写。
+    el.setAttribute('list', id);
+  }
+  return el;
+}
+
+// <datalist> 必须挂在文档里才生效，而 input() 只返回 <input> 本身，所以这里
+// 按内容生成一个共享的候选表并挂在 body 上（同样的内容只挂一个，反复重建输入框也不会越积越多）。
+const DATALISTS = new Map();
+
+function ensureDatalist(values) {
+  const key = values.map((v) => String(v)).join('\u0000');
+  const cached = DATALISTS.get(key);
+  if (cached && cached.isConnected) return cached.id;
+
+  const existing = DATALISTS.get(key);
+  const id = existing ? existing.id : `ui-list-${DATALISTS.size + 1}-${hashKey(key)}`;
+  const dl = document.createElement('datalist');
+  dl.id = id;
+  for (const v of values) dl.appendChild(h('option', { value: v }));
+  const host = document.body || document.documentElement;
+  if (host) host.appendChild(dl);
+  DATALISTS.set(key, dl);
+  return id;
+}
+
+/** 给候选表 id 用的小散列（同内容 → 同 id，跨重建稳定）。 */
+function hashKey(s) {
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) | 0;
+  return (hash >>> 0).toString(36);
 }
 
 /** 下拉框；items 为 [{value,label}] */

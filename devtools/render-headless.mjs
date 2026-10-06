@@ -330,6 +330,47 @@ if (modelNavBtn) {
   fail('导航栏里找不到「模型」入口');
 }
 
+// ===========================================================================
+// 7. 服务器页：版本号要能选、选错了要当场说清楚
+// ===========================================================================
+//
+// 为什么值得断言：用户记不住 MC 版本号，而"填错版本"在过去会死在 ping.js 里一个
+// null 上（报错和版本号看着毫无关系）。候选表是浏览器原生 <datalist>，它有个
+// 隐蔽的要求 —— **必须挂在文档里**才生效。只画一个 <input list="x"> 而忘了挂
+// <datalist id="x">，界面上什么都不会报错，下拉就是空的。
+console.log('=== 7. 服务器页的版本候选 ===');
+
+const srvNavBtn = navButtons.find((b) => b.textContent.trim().includes('服务器'));
+if (srvNavBtn) {
+  srvNavBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await new Promise(r => setTimeout(r, 500));
+
+  const vInput = [...content.querySelectorAll('input')]
+    .find((el) => el.getAttribute('list') || /auto \/ 1\.21/.test(el.getAttribute('placeholder') || ''));
+  if (vInput) ok('版本输入框在（placeholder / list 认得出它是版本那一栏）');
+  else fail('服务器页里找不到版本输入框');
+
+  const listId = vInput ? vInput.getAttribute('list') : '';
+  if (listId) {
+    ok(`★ 版本输入框接了候选表（list="${listId}"）—— 用户不用背版本号`);
+    const dl = doc.getElementById(listId);
+    if (!dl) {
+      fail(`候选表 ${listId} 没挂进文档 —— 下拉点开是空的，而且界面上不会有任何报错`);
+    } else {
+      const values = [...dl.querySelectorAll('option')]
+        .map((o) => String(o.getAttribute('value') ?? o.textContent ?? '').trim());
+      if (values.includes('auto')) ok(`候选表里有 auto：${values.join(' / ')}`);
+      else fail('候选表里没有 auto（拿不准版本时用户该有这一档）：' + values.join(' / '));
+      if (values.some((v) => /^1\.\d/.test(v))) ok('候选表里有具体版本号');
+      else fail('候选表里只有 auto，没有具体版本：' + values.join(' / '));
+    }
+  } else {
+    fail('版本输入框没接候选表（list 属性缺失）');
+  }
+} else {
+  fail('导航栏里找不到「服务器」入口');
+}
+
 if (runtimeErrors.length) {
   console.log('=== 运行期错误 ===');
   for (const e of runtimeErrors.slice(0, 20)) fail(e.split('\n')[0]);
